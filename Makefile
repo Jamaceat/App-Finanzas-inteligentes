@@ -95,7 +95,7 @@ local-apk:
 	@echo "$(BLUE)Limpiando contenedor de compilación...$(RESET)"
 	docker compose down
 	@echo "$(GREEN)Compilación finalizada.$(RESET)"
-	@echo "El archivo APK se encuentra en: $(BLUE)./dist/gymsmart.apk$(RESET)"
+	@echo "El archivo APK se encuentra en: $(BLUE)./dist/finz.apk$(RESET)"
 
 local-apk-rebuild:
 	@echo "$(BLUE)Reconstruyendo imagen Docker base y compilando APK...$(RESET)"

@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1783371671602,
+      "tag": "0000_hesitant_malcolm_colcord",
+      "breakpoints": true
+    }
+  ]
+}

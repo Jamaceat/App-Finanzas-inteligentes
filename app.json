@@ -1,16 +1,18 @@
 {
   "expo": {
-    "name": "GymSmart",
-    "slug": "GymSmart",
+    "name": "FinZ",
+    "slug": "finz",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "gymsmart",
+    "scheme": "finz",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "com.jamaceat.finz"
     },
     "android": {
+      "package": "com.jamaceat.finz",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -34,7 +36,8 @@
             "imageWidth": 76
           }
         }
-      ]
+      ],
+      "expo-sqlite"
     ],
     "experiments": {
       "typedRoutes": true,

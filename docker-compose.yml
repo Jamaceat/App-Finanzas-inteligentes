@@ -6,12 +6,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: gymsmart_apk_builder
+    container_name: finz_apk_builder
     environment:
       - USER_ID=${USER_ID}
       - GROUP_ID=${GROUP_ID}
       - GRADLE_USER_HOME=/root/.gradle
-      - APK_NAME=gymsmart.apk
+      - APK_NAME=finz.apk
     volumes:
       # Montar código fuente del host como sólo lectura
       - .:/app/src-host:ro

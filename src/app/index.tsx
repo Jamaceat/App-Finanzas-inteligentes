@@ -1,98 +1,187 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
+import { router } from 'expo-router';
+import { SymbolView, type AndroidSymbol, type SFSymbol } from 'expo-symbols';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
+import type { TransactionKind } from '@/db/queries/transactions';
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
-  return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
+const INCOME_COLOR = '#30A46C';
+const EXPENSE_COLOR = '#E5484D';
+
+function symbol(ios: SFSymbol, android: AndroidSymbol) {
+  return { ios, android, web: android };
 }
+
+type SymbolName = ReturnType<typeof symbol>;
+
+type QuickAction = {
+  key: 'now' | 'fixed' | 'variable';
+  label: string;
+  hint: string;
+  icon: SymbolName;
+  enabled: boolean;
+};
+
+const QUICK_ACTIONS: QuickAction[] = [
+  {
+    key: 'now',
+    label: 'Ahora',
+    hint: 'Se registra en este momento',
+    icon: symbol('bolt.fill', 'bolt'),
+    enabled: true,
+  },
+  {
+    key: 'fixed',
+    label: 'Fijo',
+    hint: 'Programado, mismo monto siempre',
+    icon: symbol('checkmark.seal.fill', 'verified'),
+    enabled: false,
+  },
+  {
+    key: 'variable',
+    label: 'Variable',
+    hint: 'Programado, monto todavía no lo sabés',
+    icon: symbol('questionmark.circle.fill', 'help'),
+    enabled: false,
+  },
+];
 
 export default function HomeScreen() {
   return (
     <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
-
-        <ThemedText type="code" style={styles.code}>
-          get started
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <ThemedText type="title" style={styles.title}>
+          Inicio
         </ThemedText>
 
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
+        <View style={styles.columnsRow}>
+          <TransactionKindColumn
+            kind="income"
+            title="Ingreso"
+            color={INCOME_COLOR}
+            icon={symbol('arrow.down.circle.fill', 'arrow_circle_down')}
           />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
+          <TransactionKindColumn
+            kind="expense"
+            title="Gasto"
+            color={EXPENSE_COLOR}
+            icon={symbol('arrow.up.circle.fill', 'arrow_circle_up')}
           />
-        </ThemedView>
-
-        {Platform.OS === 'web' && <WebBadge />}
+        </View>
       </SafeAreaView>
     </ThemedView>
+  );
+}
+
+function TransactionKindColumn({
+  kind,
+  title,
+  color,
+  icon,
+}: {
+  kind: TransactionKind;
+  title: string;
+  color: string;
+  icon: SymbolName;
+}) {
+  return (
+    <View style={styles.column}>
+      <View style={styles.columnHeader}>
+        <SymbolView name={icon} tintColor={color} size={28} />
+        <ThemedText type="smallBold">{title}</ThemedText>
+      </View>
+
+      {QUICK_ACTIONS.map((action) => (
+        <QuickActionButton
+          key={action.key}
+          action={action}
+          onPress={() => {
+            if (action.key === 'now') {
+              router.push({ pathname: '/transactions', params: { kind } });
+            }
+          }}
+        />
+      ))}
+    </View>
+  );
+}
+
+function QuickActionButton({ action, onPress }: { action: QuickAction; onPress: () => void }) {
+  const theme = useTheme();
+
+  return (
+    <Pressable
+      disabled={!action.enabled}
+      onPress={onPress}
+      style={({ pressed }) => pressed && action.enabled && styles.pressed}>
+      <ThemedView
+        type="backgroundElement"
+        style={[styles.actionButton, !action.enabled && styles.actionButtonDisabled]}>
+        <SymbolView name={action.icon} tintColor={theme.textSecondary} size={18} />
+        <View style={styles.actionTextWrapper}>
+          <ThemedText type="small">{action.label}</ThemedText>
+          <ThemedText type="small" themeColor="textSecondary" style={styles.actionHint}>
+            {action.enabled ? action.hint : `${action.hint} · pronto`}
+          </ThemedText>
+        </View>
+      </ThemedView>
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
+    alignItems: 'center',
   },
   safeArea: {
     flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
+    width: '100%',
     maxWidth: MaxContentWidth,
-  },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
     paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
+    paddingBottom: BottomTabInset + Spacing.three,
+    gap: Spacing.five,
   },
   title: {
-    textAlign: 'center',
+    fontSize: 28,
+    lineHeight: 34,
   },
-  code: {
-    textTransform: 'uppercase',
-  },
-  stepContainer: {
+  columnsRow: {
+    flexDirection: 'row',
     gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
+  },
+  column: {
+    flex: 1,
+    gap: Spacing.two,
+  },
+  columnHeader: {
+    alignItems: 'center',
+    gap: Spacing.one,
+    paddingBottom: Spacing.two,
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    padding: Spacing.three,
+    borderRadius: Spacing.three,
+  },
+  actionButtonDisabled: {
+    opacity: 0.5,
+  },
+  actionTextWrapper: {
+    flex: 1,
+    gap: 0,
+  },
+  actionHint: {
+    fontSize: 11,
+    lineHeight: 14,
+  },
+  pressed: {
+    opacity: 0.7,
   },
 });
