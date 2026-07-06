@@ -2,6 +2,7 @@ version: '3.8'
 
 services:
   apk-builder:
+    image: reactnative-android-builder:latest
     build:
       context: .
       dockerfile: Dockerfile
@@ -10,6 +11,7 @@ services:
       - USER_ID=${USER_ID}
       - GROUP_ID=${GROUP_ID}
       - GRADLE_USER_HOME=/root/.gradle
+      - APK_NAME=gymsmart.apk
     volumes:
       # Montar código fuente del host como sólo lectura
       - .:/app/src-host:ro

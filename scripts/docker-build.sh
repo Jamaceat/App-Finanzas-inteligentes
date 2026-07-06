@@ -63,15 +63,16 @@ rsync -a --delete "$WORKSPACE/android/" "$ANDROID_CACHE/"
 
 # 5. Copiar APK a la carpeta de salida
 echo "=== 5. Copiando APK a la carpeta de salida ==="
+APK_NAME="${APK_NAME:-app-release.apk}"
 mkdir -p /output
-cp app/build/outputs/apk/release/app-release.apk /output/gymsmart.apk
+cp app/build/outputs/apk/release/app-release.apk "/output/$APK_NAME"
 
 # Ajustar los permisos del APK generado para que pertenezcan al usuario del Host
 if [ ! -z "$USER_ID" ] && [ ! -z "$GROUP_ID" ]; then
   echo "=== 6. Ajustando permisos del APK para el usuario host ($USER_ID:$GROUP_ID) ==="
-  chown "$USER_ID:$GROUP_ID" /output/gymsmart.apk
+  chown "$USER_ID:$GROUP_ID" "/output/$APK_NAME"
 fi
 
 echo "=========================================================="
-echo "  ¡Compilación Exitosa! Archivo guardado en ./dist/gymsmart.apk"
+echo "  ¡Compilación Exitosa! Archivo guardado en ./dist/$APK_NAME"
 echo "=========================================================="

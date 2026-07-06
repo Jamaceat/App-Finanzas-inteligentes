@@ -9,5 +9,9 @@ WORKDIR /app
 # Carpeta donde se montará el volumen para extraer el APK
 RUN mkdir -p /output
 
-# Comando por defecto que ejecuta el flujo de compilación desde el volumen del host
-CMD ["/app/src-host/scripts/docker-build.sh"]
+# Copiar el script de compilación al contenedor
+COPY scripts/docker-build.sh /usr/local/bin/docker-build.sh
+RUN chmod +x /usr/local/bin/docker-build.sh
+
+# Comando por defecto que ejecuta el flujo de compilación desde el script interno
+CMD ["/usr/local/bin/docker-build.sh"]

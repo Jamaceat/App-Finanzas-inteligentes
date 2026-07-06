@@ -1,4 +1,4 @@
-.PHONY: help install start start-tunnel android web clean reset prebuild local-apk local-apk-rebuild local-apk-clean eas-login eas-config eas-apk eas-aab adb-reverse start-tablet open-tablet
+.PHONY: help install start start-tunnel android web clean reset prebuild local-apk local-apk-rebuild local-apk-clean eas-login eas-config eas-apk eas-aab adb-reverse start-tablet open-tablet wsl-usb
 
 # Puerto para depuración móvil (configurable vía: make <target> PORT=xxxx)
 PORT ?= 8082
@@ -26,6 +26,7 @@ help:
 	@echo "  adb-reverse      Configura la redirección de puertos USB para depurar en tablet (puerto $(PORT))"
 	@echo "  start-tablet     Inicia Metro en puerto $(PORT) y configura redirección ADB"
 	@echo "  open-tablet      Abre la aplicación en la tablet conectada por USB (abre Expo Go)"
+	@echo "  wsl-usb          Muestra los comandos de PowerShell para conectar USB a WSL"
 	@echo "  clean            Limpia la caché del empaquetador Metro y Expo"
 	@echo "  reset            Ejecuta el script de reinicio del proyecto"
 	@echo ""
@@ -89,9 +90,7 @@ prebuild:
 local-apk:
 	@echo "$(BLUE)Asegurando carpeta dist...$(RESET)"
 	mkdir -p dist
-	@echo "$(BLUE)Asegurando permisos de ejecución para el script de compilación...$(RESET)"
-	chmod +x scripts/docker-build.sh
-	@echo "$(BLUE)Iniciando compilación en Docker (usa caché de ejecuciones previas)...$(RESET)"
+	@echo "$(BLUE)Iniciando compilación en Docker (reutilizando imagen base)...$(RESET)"
 	USER_ID=$$(id -u) GROUP_ID=$$(id -g) docker compose up
 	@echo "$(BLUE)Limpiando contenedor de compilación...$(RESET)"
 	docker compose down
@@ -99,7 +98,7 @@ local-apk:
 	@echo "El archivo APK se encuentra en: $(BLUE)./dist/gymsmart.apk$(RESET)"
 
 local-apk-rebuild:
-	@echo "$(BLUE)Reconstruyendo imagen Docker y compilando APK...$(RESET)"
+	@echo "$(BLUE)Reconstruyendo imagen Docker base y compilando APK...$(RESET)"
 	mkdir -p dist
 	chmod +x scripts/docker-build.sh
 	USER_ID=$$(id -u) GROUP_ID=$$(id -g) docker compose up --build
@@ -124,3 +123,34 @@ eas-apk:
 eas-aab:
 	@echo "$(BLUE)Enviando compilación a la nube de Expo (AAB - Production)...$(RESET)"
 	npx eas build --platform android --profile production
+
+wsl-usb:
+	@echo "================================================================="
+	@echo "$(BLUE)Comandos para PowerShell (ejecutar como Administrador):$(RESET)"
+	@echo "================================================================="
+	@echo ""
+	@echo "$(GREEN)1. Listar dispositivos y buscar el BUSID de tu dispositivo:$(RESET)"
+	@echo "   usbipd list"
+	@echo ""
+	@echo "$(GREEN)2. Vincular el USB (solo la primera vez):$(RESET)"
+	@echo "   usbipd bind --busid <BUSID>"
+	@echo "   Ejemplo: usbipd bind --busid 2-3"
+	@echo ""
+	@echo "$(GREEN)3. Conectar el USB a WSL:$(RESET)"
+	@echo "   usbipd attach --wsl --busid <BUSID>"
+	@echo "   Ejemplo: usbipd attach --wsl --busid 2-3"
+	@echo ""
+	@echo "$(GREEN)4. Desconectar el USB de WSL:$(RESET)"
+	@echo "   usbipd detach --busid <BUSID>"
+	@echo "   Ejemplo: usbipd detach --busid 2-3"
+	@echo ""
+	@echo "================================================================="
+	@echo "$(BLUE)Comandos para verificar la conexión en WSL (Linux):$(RESET)"
+	@echo "================================================================="
+	@echo ""
+	@echo "$(GREEN)5. Verificar dispositivos USB conectados en WSL:$(RESET)"
+	@echo "   lsusb"
+	@echo ""
+	@echo "$(GREEN)6. Verificar dispositivos Android detectados por ADB:$(RESET)"
+	@echo "   adb devices"
+	@echo "================================================================="
