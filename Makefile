@@ -84,9 +84,9 @@ screenshot:
 	@echo "$(GREEN)Screenshot guardada en screenshot/screenshot.png$(RESET)"
 
 logs:
-	@echo "$(BLUE)Guardando logs del dispositivo...$(RESET)"
+	@echo "$(BLUE)Guardando logs del dispositivo (últimos 3 minutos)...$(RESET)"
 	@mkdir -p logs
-	adb logcat -d > logs/logcat.txt
+	adb logcat -d -t "$$(date -d '3 minutes ago' '+%m-%d %H:%M:%S.000')" > logs/logcat.txt
 	@echo "$(GREEN)Logs guardados en logs/logcat.txt$(RESET)"
 
 

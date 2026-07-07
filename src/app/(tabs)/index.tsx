@@ -12,6 +12,7 @@ import Animated, {
   useAnimatedRef,
   useAnimatedScrollHandler,
   useAnimatedStyle,
+  useDerivedValue,
   useSharedValue,
   withSpring,
   withTiming,
@@ -511,9 +512,12 @@ function Tank({
   tilt: SharedValue<number>;
 }) {
   const ratio = Math.max(0, Math.min(1, amount / capacity));
+  const animatedTilt = useDerivedValue(() => {
+    return withSpring(tilt.value);
+  });
   const fillStyle = useAnimatedStyle(() => ({
     height: withTiming(`${ratio * 100}%`, { duration: TANK_FILL_ANIMATION_DURATION_MS }),
-    transform: [{ rotate: `${withSpring(tilt.value)}deg` }],
+    transform: [{ rotate: `${animatedTilt.value}deg` }],
   }));
 
   return (

@@ -19,7 +19,7 @@ export const EDGE_SCROLL_STEP = 14;
 export const EDGE_SCROLL_INTERVAL_MS = 16;
 
 // Home — botón de lupa (press-and-hold para abrir el buscador de tanques)
-export const SEARCH_LONG_PRESS_DURATION_MS = 3000;
+export const SEARCH_LONG_PRESS_DURATION_MS = 1000;
 export const SEARCH_PRESS_RELEASE_DURATION_MS = 150;
 
 // Home — animación de llenado del tanque
