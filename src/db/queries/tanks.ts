@@ -101,6 +101,27 @@ export function getPreviousCycleWindow(rule: IntervalRule & { nextDueDate: Date 
   return { start, end: currentStart };
 }
 
+export type SettingsIntervalUnit = 'days' | 'weeks' | 'months' | 'years';
+
+export function addInterval(date: Date, value: number, unit: SettingsIntervalUnit): Date {
+  const next = new Date(date);
+  switch (unit) {
+    case 'days':
+      next.setDate(next.getDate() + value);
+      break;
+    case 'weeks':
+      next.setDate(next.getDate() + value * 7);
+      break;
+    case 'months':
+      next.setMonth(next.getMonth() + value);
+      break;
+    case 'years':
+      next.setFullYear(next.getFullYear() + value);
+      break;
+  }
+  return next;
+}
+
 type Rule = {
   id: number;
   sectionId: number;
@@ -160,38 +181,57 @@ export function computeIncomeTanks(rules: Rule[], transactions: Transaction[]): 
         ruleId: rule.id,
         sectionId: rule.sectionId,
         label: rule.label,
-        capacity: received,
+        capacity: rule.isVariableAmount ? received : (rule.estimatedAmount ?? received),
         level: Math.max(0, received - allocated),
       };
     });
 }
 
-export function computeFreeCash(rules: Rule[], transactions: Transaction[]): number {
-  const freeIncome = transactions
-    .filter((t) => t.kind === 'income' && t.recurringRuleId === null)
-    .reduce((total, t) => total + t.amount, 0);
-  const freeExpense = transactions
-    .filter((t) => t.kind === 'expense' && t.recurringRuleId === null)
-    .reduce((total, t) => total + t.amount, 0);
+export type FreeCashTank = {
+  capacity: number;
+  level: number;
+};
+
+export function computeFreeCashTank(
+  rules: Rule[],
+  transactions: Transaction[],
+  windowStart: Date,
+): FreeCashTank {
+  const now = new Date();
+  const window = { start: windowStart, end: now };
+
+  const freeIncomeInWindow = sumInWindow(
+    transactions,
+    (t) => t.kind === 'income' && t.recurringRuleId === null,
+    window,
+  );
+  const freeExpenseInWindow = sumInWindow(
+    transactions,
+    (t) => t.kind === 'expense' && t.recurringRuleId === null,
+    window,
+  );
 
   const leftoverFromClosedCycles = rules
     .filter((rule) => rule.kind === 'income' && !rule.archivedAt)
     .reduce((total, rule) => {
-      const window = getPreviousCycleWindow(rule);
+      const previousWindow = getPreviousCycleWindow(rule);
       const received = sumInWindow(
         transactions,
         (t) => t.kind === 'income' && t.recurringRuleId === rule.id,
-        window,
+        previousWindow,
       );
       const allocated = sumInWindow(
         transactions,
         (t) => t.kind === 'expense' && t.allocatedIncomeRuleId === rule.id,
-        window,
+        previousWindow,
       );
       return total + Math.max(0, received - allocated);
     }, 0);
 
-  return freeIncome - freeExpense + leftoverFromClosedCycles;
+  return {
+    capacity: Math.max(freeIncomeInWindow, 1),
+    level: Math.max(0, freeIncomeInWindow - freeExpenseInWindow) + leftoverFromClosedCycles,
+  };
 }
 
 export type PendingExpense = {

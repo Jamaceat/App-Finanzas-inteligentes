@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, lte } from 'drizzle-orm';
+import { and, desc, eq, gte, isNull, lte } from 'drizzle-orm';
 
 import { db } from '@/db/client';
 import { transactions } from '@/db/schema';
@@ -37,6 +37,22 @@ export function createTransaction(input: {
 
 export function deleteTransaction(id: number) {
   return db.delete(transactions).where(eq(transactions.id, id)).returning();
+}
+
+export function listUnassignedExpenseTransactions() {
+  return db
+    .select()
+    .from(transactions)
+    .where(and(eq(transactions.kind, 'expense'), isNull(transactions.allocatedIncomeRuleId)))
+    .orderBy(desc(transactions.occurredAt));
+}
+
+export function assignTransactionToIncomeTank(transactionId: number, incomeRuleId: number) {
+  return db
+    .update(transactions)
+    .set({ allocatedIncomeRuleId: incomeRuleId })
+    .where(eq(transactions.id, transactionId))
+    .returning();
 }
 
 export async function allocateExpenseToIncomeTank(input: {

@@ -72,8 +72,44 @@ export default function CajaScreen() {
             icon={symbol('arrow.up.circle.fill', 'arrow_circle_up')}
           />
         </View>
+
+        <View style={styles.secondaryRow}>
+          <SecondaryButton
+            label="Asignar gastos"
+            icon={symbol('shippingbox.fill', 'inventory_2')}
+            onPress={() => router.push('/asignar-gastos')}
+          />
+          <SecondaryButton
+            label="Ajustes"
+            icon={symbol('gearshape.fill', 'settings')}
+            onPress={() => router.push('/settings')}
+          />
+        </View>
       </SafeAreaView>
     </ThemedView>
+  );
+}
+
+function SecondaryButton({
+  label,
+  icon,
+  onPress,
+}: {
+  label: string;
+  icon: SymbolName;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.secondaryFlex, pressed && styles.pressed]}>
+      <ThemedView type="backgroundElement" style={styles.secondaryButton}>
+        <SymbolView name={icon} tintColor={theme.textSecondary} size={18} />
+        <ThemedText type="small">{label}</ThemedText>
+      </ThemedView>
+    </Pressable>
   );
 }
 
@@ -158,6 +194,21 @@ const styles = StyleSheet.create({
   columnsRow: {
     flexDirection: 'row',
     gap: Spacing.three,
+  },
+  secondaryRow: {
+    flexDirection: 'row',
+    gap: Spacing.three,
+  },
+  secondaryFlex: {
+    flex: 1,
+  },
+  secondaryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.two,
+    padding: Spacing.three,
+    borderRadius: Spacing.three,
   },
   column: {
     flex: 1,

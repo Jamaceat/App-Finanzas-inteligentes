@@ -1,6 +1,7 @@
+/* eslint-disable react-hooks/immutability */
 import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
 import { Children, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, View, type LayoutChangeEvent, type GestureResponderEvent } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, View, Modal, type LayoutChangeEvent, type GestureResponderEvent } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -47,11 +48,13 @@ import {
 } from '@/constants/constants';
 import { useDeviceTilt } from '@/hooks/use-device-tilt';
 import { useTheme } from '@/hooks/use-theme';
-import { listActiveRecurringRules } from '@/db/queries/recurring-rules';
+import { listActiveRecurringRules, rolloverDueIncomeRules } from '@/db/queries/recurring-rules';
 import { listActiveSections } from '@/db/queries/sections';
+import { watchAppSettingsRow } from '@/db/queries/settings';
 import { listTransactions, allocateExpenseToIncomeTank } from '@/db/queries/transactions';
 import {
-  computeFreeCash,
+  addInterval,
+  computeFreeCashTank,
   computeIncomeTanks,
   computePendingExpenses,
   type IncomeTank,
@@ -69,12 +72,30 @@ function formatCurrency(amount: number): string {
   return currencyFormatter.format(amount);
 }
 
+function formatCompactCurrency(amount: number): string {
+  if (amount >= 1_000_000) {
+    const val = amount / 1_000_000;
+    return `$${val.toFixed(val % 1 === 0 ? 0 : 1)}M`;
+  }
+  if (amount >= 1_000) {
+    const val = amount / 1_000;
+    return `$${val.toFixed(val % 1 === 0 ? 0 : 1)}K`;
+  }
+  return formatCurrency(amount);
+}
+
 export default function HomeScreen() {
   const { data: rules } = useLiveQuery(listActiveRecurringRules());
   const { data: transactions } = useLiveQuery(listTransactions());
   const { data: sections } = useLiveQuery(listActiveSections());
+  const { data: settingsRows } = useLiveQuery(watchAppSettingsRow());
+  const settings = settingsRows[0] ?? { tankMaxRenewalValue: 30, tankMaxRenewalUnit: 'days' as const };
   const tilt = useDeviceTilt();
   const theme = useTheme();
+
+  useEffect(() => {
+    rolloverDueIncomeRules(rules);
+  }, [rules]);
 
   const scrollRef = useAnimatedRef<Animated.ScrollView>();
   const [selectedSectionId, setSelectedSectionId] = useState<number | null>(null);
@@ -82,6 +103,33 @@ export default function HomeScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isPressing, setIsPressing] = useState(false);
   const pressProgress = useSharedValue(0);
+
+  // States for selected expense detail modal
+  const [focusedExpense, setFocusedExpense] = useState<PendingExpense | null>(null);
+  const [expenseTankIndices, setExpenseTankIndices] = useState<Record<number, number>>({});
+
+  // Reanimated values for focused modal animations
+  const backdropOpacity = useSharedValue(0);
+  const modalScale = useSharedValue(0.8);
+  const modalTranslateY = useSharedValue(50);
+
+  useEffect(() => {
+    if (focusedExpense) {
+      backdropOpacity.value = withTiming(1, { duration: 250 });
+      modalScale.value = withSpring(1, { damping: 15, stiffness: 120 });
+      modalTranslateY.value = withSpring(0, { damping: 15, stiffness: 120 });
+    }
+  }, [focusedExpense, backdropOpacity, modalScale, modalTranslateY]);
+
+  const closeModal = () => {
+    backdropOpacity.value = withTiming(0, { duration: 200 });
+    modalScale.value = withTiming(0.8, { duration: 200 });
+    modalTranslateY.value = withTiming(50, { duration: 200 }, (finished) => {
+      if (finished) {
+        runOnJS(setFocusedExpense)(null);
+      }
+    });
+  };
 
   const handlePressIn = () => {
     setIsPressing(true);
@@ -107,7 +155,14 @@ export default function HomeScreen() {
   };
 
   const incomeTanks = useMemo(() => computeIncomeTanks(rules, transactions), [rules, transactions]);
-  const freeCash = useMemo(() => computeFreeCash(rules, transactions), [rules, transactions]);
+  const freeCashTank = useMemo(() => {
+    const windowStart = addInterval(
+      new Date(),
+      -settings.tankMaxRenewalValue,
+      settings.tankMaxRenewalUnit,
+    );
+    return computeFreeCashTank(rules, transactions, windowStart);
+  }, [rules, transactions, settings.tankMaxRenewalValue, settings.tankMaxRenewalUnit]);
   const pendingExpenses = useMemo(() => computePendingExpenses(rules), [rules]);
 
   const allTanks = useMemo(() => {
@@ -115,8 +170,8 @@ export default function HomeScreen() {
       {
         ruleId: undefined,
         label: 'Libre',
-        amount: freeCash,
-        capacity: Math.max(freeCash, 1),
+        amount: freeCashTank.level,
+        capacity: Math.max(freeCashTank.capacity, 1),
         color: FREE_TANK_COLOR,
       },
     ];
@@ -130,7 +185,7 @@ export default function HomeScreen() {
       });
     });
     return list;
-  }, [freeCash, incomeTanks]);
+  }, [freeCashTank, incomeTanks]);
 
   const handleSelectTank = (selected: SearchTankItem) => {
     setModalVisible(false);
@@ -265,8 +320,8 @@ export default function HomeScreen() {
         <TankCarousel scrollRef={scrollRef}>
           <Tank
             label="Libre"
-            amount={freeCash}
-            capacity={Math.max(freeCash, 1)}
+            amount={freeCashTank.level}
+            capacity={Math.max(freeCashTank.capacity, 1)}
             color={FREE_TANK_COLOR}
             tilt={tilt}
           />
@@ -295,14 +350,26 @@ export default function HomeScreen() {
             </ThemedText>
           )}
           <View style={styles.pendingList}>
-            {pendingExpenses.map((expense) => (
-              <PendingExpenseCard
-                key={expense.ruleId}
-                expense={expense}
-                tanks={incomeTanks}
-                onDropOnTank={(tank) => confirmAllocate(expense, tank)}
-              />
-            ))}
+            {pendingExpenses.map((expense) => {
+              const currentTankIndex = expenseTankIndices[expense.ruleId] ?? 0;
+              const section = (sections || []).find((s) => s.id === expense.sectionId);
+              return (
+                <PendingExpenseCard
+                  key={expense.ruleId}
+                  expense={expense}
+                  tanks={incomeTanks}
+                  section={section}
+                  tankIndex={currentTankIndex}
+                  onSelectTankIndex={(newIdx) => {
+                    setExpenseTankIndices((prev) => ({ ...prev, [expense.ruleId]: newIdx }));
+                  }}
+                  onPress={() => {
+                    setFocusedExpense(expense);
+                  }}
+                  onDropOnTank={(tank) => confirmAllocate(expense, tank)}
+                />
+              );
+            })}
           </View>
         </View>
         <TankSearchModal
@@ -317,6 +384,186 @@ export default function HomeScreen() {
           onSelectTank={handleSelectTank}
         />
       </SafeAreaView>
+
+      {/* Focused Expense Detail Modal */}
+      {focusedExpense && (() => {
+        const hasTanks = incomeTanks.length > 0;
+        const currentTankIndex = expenseTankIndices[focusedExpense.ruleId] ?? 0;
+        const focusedSection = (sections || []).find((s) => s.id === focusedExpense.sectionId);
+        
+        return (
+          <Modal
+            transparent
+            visible={focusedExpense !== null}
+            onRequestClose={closeModal}
+            statusBarTranslucent
+            animationType="none"
+          >
+            <View style={styles.modalOverlayContainer}>
+              <Animated.View 
+                style={[
+                  styles.modalBackdrop, 
+                  { 
+                    opacity: backdropOpacity,
+                    backgroundColor: theme.background === '#000000' ? 'rgba(0,0,0,0.75)' : 'rgba(0,0,0,0.65)'
+                  }
+                ]}
+              >
+                <Pressable style={styles.backdropPressable} onPress={closeModal} />
+              </Animated.View>
+
+              <Animated.View 
+                style={[
+                  styles.focusedCardContainer, 
+                  { 
+                    backgroundColor: theme.backgroundElement,
+                    transform: [{ scale: modalScale }, { translateY: modalTranslateY }] 
+                  }
+                ]}
+              >
+                <View style={styles.focusedHeader}>
+                  <ThemedText type="smallBold" themeColor="textSecondary">
+                    Asignar Gasto Pendiente
+                  </ThemedText>
+                  {focusedSection && (
+                    <View style={[styles.focusedSectionBadge, { backgroundColor: focusedSection.color + '1F' }]}>
+                      <SymbolView 
+                        name={symbol(focusedSection.icon as SFSymbol, focusedSection.icon as AndroidSymbol)}
+                        tintColor={focusedSection.color}
+                        size={12}
+                      />
+                      <ThemedText type="code" style={{ color: focusedSection.color, marginLeft: 4 }}>
+                        {focusedSection.name}
+                      </ThemedText>
+                    </View>
+                  )}
+                </View>
+
+                <View style={styles.focusedExpenseDetail}>
+                  <ThemedText type="subtitle" style={styles.focusedExpenseLabel} numberOfLines={2}>
+                    {focusedExpense.label}
+                  </ThemedText>
+                  <ThemedText style={[styles.focusedExpenseAmount, { color: theme.text }]}>
+                    {focusedExpense.isVariableAmount
+                      ? 'Monto variable'
+                      : formatCurrency(focusedExpense.estimatedAmount ?? 0)}
+                  </ThemedText>
+                  <ThemedText type="small" themeColor="textSecondary" style={styles.focusedExpenseMeta}>
+                    {`Frecuencia: ${focusedExpense.frequency} • Vence: ${new Date(focusedExpense.nextDueDate).toLocaleDateString('es-AR')}`}
+                  </ThemedText>
+                </View>
+
+                <View style={styles.focusedTargetContainer}>
+                  <ThemedText type="small" themeColor="textSecondary" style={{ marginBottom: 6 }}>
+                    Se debitará del tanque:
+                  </ThemedText>
+                  <View style={[
+                    styles.focusedTargetTankBadge, 
+                    { 
+                      backgroundColor: theme.backgroundSelected,
+                      borderColor: theme.backgroundSelected,
+                      borderWidth: 1,
+                    }
+                  ]}>
+                    <View style={[
+                      styles.tankBullet, 
+                      { backgroundColor: hasTanks ? TANK_COLOR : '#E5484D' }
+                    ]} />
+                    <ThemedText type="smallBold" style={{ flex: 1 }}>
+                      {hasTanks ? incomeTanks[currentTankIndex].label : 'Sin tanques'}
+                    </ThemedText>
+                    <ThemedText type="small" themeColor="textSecondary">
+                      {hasTanks ? `Saldo: ${formatCurrency(incomeTanks[currentTankIndex].level)}` : ''}
+                    </ThemedText>
+                  </View>
+                </View>
+
+                {hasTanks && (
+                  <View style={styles.focusedTankSelectorContainer}>
+                    <ThemedText type="smallBold" themeColor="textSecondary" style={{ marginBottom: 8 }}>
+                      Cambiar de tanque origen:
+                    </ThemedText>
+                    <ScrollView 
+                      horizontal 
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={styles.focusedTankList}
+                    >
+                      {incomeTanks.map((tank, index) => {
+                        const isSelected = index === currentTankIndex;
+                        return (
+                          <Pressable
+                            key={tank.ruleId}
+                            onPress={() => {
+                              setExpenseTankIndices(prev => ({ ...prev, [focusedExpense.ruleId]: index }));
+                            }}
+                            style={[
+                              styles.focusedTankChip,
+                              { 
+                                backgroundColor: isSelected ? TANK_COLOR : theme.backgroundSelected,
+                                borderColor: isSelected ? TANK_COLOR : theme.backgroundSelected,
+                              }
+                            ]}
+                          >
+                            <View style={[styles.tankBullet, { backgroundColor: isSelected ? '#ffffff' : TANK_COLOR }]} />
+                            <ThemedText 
+                              type="small" 
+                              style={{ 
+                                color: isSelected ? '#ffffff' : theme.text,
+                                fontWeight: isSelected ? '700' : '500'
+                              }}
+                            >
+                              {tank.label}
+                            </ThemedText>
+                            <ThemedText 
+                              type="code" 
+                              style={{ 
+                                color: isSelected ? 'rgba(255,255,255,0.8)' : theme.textSecondary,
+                                fontSize: 11,
+                                marginLeft: 6
+                              }}
+                            >
+                              {formatCompactCurrency(tank.level)}
+                            </ThemedText>
+                          </Pressable>
+                        );
+                      })}
+                    </ScrollView>
+                  </View>
+                )}
+
+                <View style={styles.focusedActions}>
+                  <Pressable
+                    onPress={closeModal}
+                    style={[styles.btnSecondary, { backgroundColor: theme.backgroundSelected }]}
+                  >
+                    <ThemedText type="smallBold" themeColor="textSecondary">
+                      Cancelar
+                    </ThemedText>
+                  </Pressable>
+                  <Pressable
+                    onPress={async () => {
+                      if (hasTanks) {
+                        const targetTank = incomeTanks[currentTankIndex];
+                        closeModal();
+                        await handleAllocate(focusedExpense, targetTank);
+                      }
+                    }}
+                    style={[
+                      styles.btnPrimary, 
+                      { backgroundColor: hasTanks ? TANK_COLOR : theme.backgroundSelected }
+                    ]}
+                    disabled={!hasTanks}
+                  >
+                    <ThemedText type="smallBold" style={{ color: '#ffffff' }}>
+                      Confirmar Pago
+                    </ThemedText>
+                  </Pressable>
+                </View>
+              </Animated.View>
+            </View>
+          </Modal>
+        );
+      })()}
     </ThemedView>
   );
 }
@@ -538,25 +785,29 @@ function Tank({
 function PendingExpenseCard({
   expense,
   tanks,
+  section,
+  tankIndex,
+  onSelectTankIndex,
+  onPress,
   onDropOnTank,
 }: {
   expense: PendingExpense;
   tanks: IncomeTank[];
+  section?: { name: string; color: string; icon: string };
+  tankIndex: number;
+  onSelectTankIndex: (index: number) => void;
+  onPress: () => void;
   onDropOnTank: (tank: IncomeTank) => void;
 }) {
   const theme = useTheme();
   const translateX = useSharedValue(0);
-  const [tankIndex, setTankIndex] = useState(0);
+  const cardScale = useSharedValue(1);
   const hasTanks = tanks.length > 0;
 
   function selectTank(direction: 1 | -1) {
     if (!hasTanks) return;
-    setTankIndex((current) => (current + direction + tanks.length) % tanks.length);
-  }
-
-  function confirmDrop() {
-    if (!hasTanks) return;
-    onDropOnTank(tanks[tankIndex]);
+    const nextIdx = (tankIndex + direction + tanks.length) % tanks.length;
+    onSelectTankIndex(nextIdx);
   }
 
   const pan = Gesture.Pan()
@@ -570,31 +821,87 @@ function PendingExpenseCard({
       } else if (event.translationX < -threshold) {
         runOnJS(selectTank)(-1);
       } else if (Math.abs(event.translationX) < 10) {
-        runOnJS(confirmDrop)();
+        runOnJS(onPress)();
       }
       translateX.value = withSpring(0);
     });
 
   const cardStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: translateX.value }],
+    transform: [
+      { translateX: translateX.value },
+      { scale: cardScale.value }
+    ],
   }));
+
+  const sectionColor = section?.color || TANK_COLOR;
+  const sectionIconName = section?.icon || 'tag.fill';
 
   return (
     <GestureDetector gesture={pan}>
       <Animated.View style={cardStyle}>
-        <ThemedView type="backgroundElement" style={styles.pendingCard}>
-          <View style={styles.pendingCardMain}>
-            <ThemedText type="smallBold">{expense.label}</ThemedText>
-            <ThemedText type="small" themeColor="textSecondary">
-              {expense.isVariableAmount
-                ? 'Monto variable'
-                : `Estimado ${formatCurrency(expense.estimatedAmount ?? 0)}`}
-            </ThemedText>
-          </View>
-          <ThemedText type="small" style={{ color: theme.textSecondary }}>
-            {hasTanks ? `→ ${tanks[tankIndex].label}` : 'Sin tanques'}
-          </ThemedText>
-        </ThemedView>
+        <Pressable
+          onPressIn={() => {
+            cardScale.value = withTiming(0.97, { duration: 100 });
+          }}
+          onPressOut={() => {
+            cardScale.value = withTiming(1, { duration: 100 });
+          }}
+          onPress={onPress}
+        >
+          <ThemedView type="backgroundElement" style={styles.pendingCard}>
+            {/* Left: Section Icon Badge */}
+            <View style={[styles.cardIconContainer, { backgroundColor: sectionColor + '1C' }]}>
+              <SymbolView
+                name={symbol(sectionIconName as SFSymbol, sectionIconName as AndroidSymbol)}
+                tintColor={sectionColor}
+                size={18}
+              />
+            </View>
+
+            {/* Middle: Title & Date (Full width flex) */}
+            <View style={styles.pendingCardMain}>
+              <ThemedText style={styles.cardLabelText} numberOfLines={2}>
+                {expense.label}
+              </ThemedText>
+              <ThemedText type="small" themeColor="textSecondary" style={styles.cardSubText}>
+                {expense.frequency === 'custom'
+                  ? `${expense.customIntervalValue} ${expense.customIntervalUnit === 'weeks' ? 'sem' : 'días'}`
+                  : expense.frequency}
+              </ThemedText>
+            </View>
+
+            {/* Right: Value & Assigned Tank */}
+            <View style={styles.cardRightColumn}>
+              <ThemedText style={[styles.cardValueText, { color: theme.text }]}>
+                {expense.isVariableAmount
+                  ? 'Var.'
+                  : formatCompactCurrency(expense.estimatedAmount ?? 0)}
+              </ThemedText>
+              
+              <View style={[
+                styles.cardTankPill, 
+                { backgroundColor: hasTanks ? TANK_COLOR + '14' : '#E5484D14' }
+              ]}>
+                <View style={[
+                  styles.tankBulletMini, 
+                  { backgroundColor: hasTanks ? TANK_COLOR : '#E5484D' }
+                ]} />
+                <ThemedText 
+                  type="code" 
+                  numberOfLines={1} 
+                  style={{ 
+                    color: hasTanks ? TANK_COLOR : '#E5484D',
+                    fontSize: 10,
+                    fontWeight: '700',
+                    maxWidth: 70
+                  }}
+                >
+                  {hasTanks ? tanks[tankIndex].label : 'Sin tanques'}
+                </ThemedText>
+              </View>
+            </View>
+          </ThemedView>
+        </Pressable>
       </Animated.View>
     </GestureDetector>
   );
@@ -725,12 +1032,167 @@ const styles = StyleSheet.create({
   },
   pendingCard: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
     padding: Spacing.three,
-    borderRadius: Spacing.three,
+    borderRadius: Spacing.four,
+    borderWidth: 1,
+    borderColor: 'rgba(128,128,128,0.1)',
+  },
+  cardIconContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: Spacing.three,
   },
   pendingCardMain: {
-    gap: Spacing.half,
+    flex: 1,
+    justifyContent: 'center',
+  },
+  cardLabelText: {
+    fontSize: 16,
+    fontWeight: '600',
+    lineHeight: 20,
+  },
+  cardSubText: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  cardRightColumn: {
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    marginLeft: Spacing.two,
+    gap: 4,
+  },
+  cardValueText: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  cardTankPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    gap: 4,
+  },
+  tankBulletMini: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  modalOverlayContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFill,
+  },
+  backdropPressable: {
+    flex: 1,
+  },
+  focusedCardContainer: {
+    width: '90%',
+    maxWidth: 380,
+    borderRadius: 24,
+    padding: Spacing.four,
+    borderWidth: 1,
+    borderColor: 'rgba(128,128,128,0.15)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 15,
+    elevation: 10,
+    gap: Spacing.three,
+  },
+  focusedHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  focusedSectionBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  focusedExpenseDetail: {
+    alignItems: 'center',
+    marginVertical: Spacing.two,
+  },
+  focusedExpenseLabel: {
+    fontSize: 22,
+    fontWeight: '700',
+    textAlign: 'center',
+    lineHeight: 28,
+    marginBottom: Spacing.two,
+  },
+  focusedExpenseAmount: {
+    fontSize: 32,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  focusedExpenseMeta: {
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  focusedTargetContainer: {
+    width: '100%',
+  },
+  focusedTargetTankBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: Spacing.three,
+    borderRadius: 12,
+  },
+  tankBullet: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 8,
+  },
+  focusedTankSelectorContainer: {
+    width: '100%',
+  },
+  focusedTankList: {
+    gap: Spacing.two,
+    paddingVertical: 4,
+  },
+  focusedTankChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  focusedActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+    marginTop: Spacing.two,
+  },
+  btnPrimary: {
+    flex: 1,
+    height: 48,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: TANK_COLOR,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  btnSecondary: {
+    flex: 1,
+    height: 48,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });

@@ -72,3 +72,17 @@ export const savingsGoals = sqliteTable('savings_goals', {
     .notNull()
     .default(sql`(unixepoch())`),
 });
+
+export const appSettings = sqliteTable('app_settings', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  tankMaxRenewalValue: integer('tank_max_renewal_value').notNull().default(30),
+  tankMaxRenewalUnit: text('tank_max_renewal_unit', {
+    enum: ['days', 'weeks', 'months', 'years'],
+  })
+    .notNull()
+    .default('days'),
+  vibrationEnabled: integer('vibration_enabled', { mode: 'boolean' }).notNull().default(true),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+});

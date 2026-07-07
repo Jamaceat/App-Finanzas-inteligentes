@@ -1,0 +1,1 @@
+ALTER TABLE `app_settings` ADD `vibration_enabled` integer DEFAULT true NOT NULL;
