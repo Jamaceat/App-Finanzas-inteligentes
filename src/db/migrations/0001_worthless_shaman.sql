@@ -1,0 +1,1 @@
+ALTER TABLE `transactions` ADD `allocated_income_rule_id` integer REFERENCES recurring_rules(id);

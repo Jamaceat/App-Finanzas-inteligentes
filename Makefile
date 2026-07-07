@@ -1,10 +1,13 @@
-.PHONY: help install start start-tunnel android web clean reset prebuild local-apk local-apk-rebuild local-apk-clean eas-login eas-config eas-apk eas-aab adb-reverse start-tablet open-tablet wsl-usb
+.PHONY: help install start start-tunnel android web clean reset dev-reset prebuild local-apk local-apk-rebuild local-apk-clean eas-login eas-config eas-apk eas-aab adb-reverse start-tablet open-tablet screenshot wsl-usb
 
 # Puerto para depuración móvil (configurable vía: make <target> PORT=xxxx)
 PORT ?= 8082
 
 # Gestor de paquetes por defecto (npm)
 PACKAGE_MANAGER = npm
+
+# Identificador de la app (para forzar el cierre vía adb en dev-reset)
+APP_PACKAGE = com.jamaceat.finz
 
 # Color de terminal
 BLUE  = \033[1;34m
@@ -26,9 +29,11 @@ help:
 	@echo "  adb-reverse      Configura la redirección de puertos USB para depurar en tablet (puerto $(PORT))"
 	@echo "  start-tablet     Inicia Metro en puerto $(PORT) y configura redirección ADB"
 	@echo "  open-tablet      Abre la aplicación en la tablet conectada por USB (abre Expo Go)"
+	@echo "  screenshot       Toma una captura de pantalla del dispositivo y la guarda en screenshot/screenshot.png"
 	@echo "  wsl-usb          Muestra los comandos de PowerShell para conectar USB a WSL"
 	@echo "  clean            Limpia la caché del empaquetador Metro y Expo"
 	@echo "  reset            Ejecuta el script de reinicio del proyecto"
+	@echo "  dev-reset        Reinicio completo: mata Metro, fuerza el cierre de la app en el dispositivo, limpia cachés y reinicia con -c"
 	@echo ""
 	@echo "$(BLUE)Compilación Local (Aislada con Docker):$(RESET)"
 	@echo "  prebuild          Genera las carpetas nativas de Android e iOS (expo prebuild)"
@@ -72,6 +77,12 @@ open-tablet:
 	@echo "$(BLUE)Abriendo la aplicación en la tablet (Expo Go)...$(RESET)"
 	adb shell am start -a android.intent.action.VIEW -d "exp://localhost:$(PORT)"
 
+screenshot:
+	@echo "$(BLUE)Tomando screenshot del dispositivo...$(RESET)"
+	@mkdir -p screenshot
+	adb exec-out screencap -p > screenshot/screenshot.png
+	@echo "$(GREEN)Screenshot guardada en screenshot/screenshot.png$(RESET)"
+
 clean:
 	@echo "$(BLUE)Limpiando caché de Metro y carpeta de salida...$(RESET)"
 	npx expo start -c
@@ -81,6 +92,17 @@ clean:
 reset:
 	@echo "$(BLUE)Ejecutando reinicio completo...$(RESET)"
 	$(PACKAGE_MANAGER) run reset-project
+
+dev-reset:
+	@echo "$(BLUE)Matando procesos de Metro/Expo previos...$(RESET)"
+	-pkill -f "expo start" 2>/dev/null || true
+	@echo "$(BLUE)Forzando el cierre de la app en el dispositivo/emulador (Expo Go y build propio)...$(RESET)"
+	-adb shell am force-stop host.exp.exponent 2>/dev/null || true
+	-adb shell am force-stop $(APP_PACKAGE) 2>/dev/null || true
+	@echo "$(BLUE)Limpiando cachés locales (.expo, node_modules/.cache)...$(RESET)"
+	rm -rf .expo node_modules/.cache
+	@echo "$(GREEN)Listo. Iniciando Metro con caché limpia en el puerto $(PORT)...$(RESET)"
+	npx expo start -c --port $(PORT)
 
 prebuild:
 	@echo "$(BLUE)Generando directorios nativos...$(RESET)"

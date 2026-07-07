@@ -37,7 +37,13 @@
           }
         }
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-notifications",
+        {
+          "defaultChannel": "finz-reminders"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

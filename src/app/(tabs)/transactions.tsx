@@ -1,7 +1,7 @@
 import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
 import { useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, TextInput } from 'react-native';
+import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -9,7 +9,23 @@ import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { createTransaction, listTransactions, type TransactionKind } from '@/db/queries/transactions';
-import { listActiveSections } from '@/db/queries/sections';
+import { getOrCreateDefaultSection, listActiveSections } from '@/db/queries/sections';
+
+const currencyFormatter = new Intl.NumberFormat('es-AR', {
+  style: 'currency',
+  currency: 'ARS',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+function formatCurrencyInput(digits: string): string {
+  const cents = Number(digits || '0');
+  return currencyFormatter.format(cents / 100);
+}
+
+function formatCurrency(amount: number): string {
+  return currencyFormatter.format(amount);
+}
 
 export default function TransactionsScreen() {
   const { kind: initialKind } = useLocalSearchParams<{ kind?: TransactionKind }>();
@@ -52,19 +68,19 @@ export default function TransactionsScreen() {
             const isExpense = transaction.kind === 'expense';
             return (
               <ThemedView key={transaction.id} type="backgroundElement" style={styles.row}>
-                <ThemedView style={styles.rowMain}>
+                <View style={styles.rowMain}>
                   <ThemedText type="smallBold">{section?.name ?? 'Sección'}</ThemedText>
                   {transaction.description ? (
                     <ThemedText type="small" themeColor="textSecondary">
                       {transaction.description}
                     </ThemedText>
                   ) : null}
-                </ThemedView>
+                </View>
                 <ThemedText
                   type="smallBold"
                   style={{ color: isExpense ? '#E5484D' : '#30A46C' }}>
                   {isExpense ? '-' : '+'}
-                  {transaction.amount.toFixed(2)}
+                  {formatCurrency(transaction.amount)}
                 </ThemedText>
               </ThemedView>
             );
@@ -85,7 +101,7 @@ function SectionFilterRow({
   onSelect: (id: number | undefined) => void;
 }) {
   return (
-    <ThemedView style={styles.chipRow}>
+    <View style={styles.chipRow}>
       <FilterChip label="Todas" selected={selectedId === undefined} onPress={() => onSelect(undefined)} />
       {sections.map((section) => (
         <FilterChip
@@ -95,7 +111,7 @@ function SectionFilterRow({
           onPress={() => onSelect(section.id)}
         />
       ))}
-    </ThemedView>
+    </View>
   );
 }
 
@@ -128,43 +144,40 @@ function QuickAddForm({
 }) {
   const theme = useTheme();
   const [kind, setKind] = useState<TransactionKind>(initialKind ?? 'expense');
-  const [amount, setAmount] = useState('');
+  const [amountDigits, setAmountDigits] = useState('');
   const [description, setDescription] = useState('');
-  const [sectionId, setSectionId] = useState<number | undefined>(sections[0]?.id);
+  const [sectionId, setSectionId] = useState<number | undefined>(undefined);
 
-  const selectedSectionId = sectionId ?? sections[0]?.id;
+  const parsedAmount = Number(amountDigits || '0') / 100;
+  const formattedAmount = formatCurrencyInput(amountDigits);
+
+  function handleAmountChange(text: string) {
+    const digitsOnly = text.replace(/\D/g, '');
+    setAmountDigits(digitsOnly.replace(/^0+(?=\d)/, ''));
+  }
 
   async function handleSubmit() {
-    const parsedAmount = Number(amount.replace(',', '.'));
-    if (!selectedSectionId || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
       return;
     }
 
+    const resolvedSectionId = sectionId ?? (await getOrCreateDefaultSection()).id;
+
     await createTransaction({
-      sectionId: selectedSectionId,
+      sectionId: resolvedSectionId,
       amount: parsedAmount,
       kind,
       description: description.trim() || undefined,
       occurredAt: new Date(),
     });
 
-    setAmount('');
+    setAmountDigits('');
     setDescription('');
-  }
-
-  if (sections.length === 0) {
-    return (
-      <ThemedView type="backgroundElement" style={styles.form}>
-        <ThemedText themeColor="textSecondary">
-          Creá una sección primero para poder registrar transacciones.
-        </ThemedText>
-      </ThemedView>
-    );
   }
 
   return (
     <ThemedView type="backgroundElement" style={styles.form}>
-      <ThemedView style={styles.kindRow}>
+      <View style={styles.kindRow}>
         <Pressable style={styles.kindButton} onPress={() => setKind('expense')}>
           <ThemedView
             type={kind === 'expense' ? 'backgroundSelected' : 'background'}
@@ -179,14 +192,14 @@ function QuickAddForm({
             <ThemedText type="small">Ingreso</ThemedText>
           </ThemedView>
         </Pressable>
-      </ThemedView>
+      </View>
 
       <TextInput
-        value={amount}
-        onChangeText={setAmount}
-        placeholder="Monto"
+        value={formattedAmount}
+        onChangeText={handleAmountChange}
+        placeholder="$ 0,00"
         placeholderTextColor={theme.textSecondary}
-        keyboardType="decimal-pad"
+        keyboardType="number-pad"
         style={[styles.input, { color: theme.text, backgroundColor: theme.background }]}
       />
 
@@ -198,16 +211,23 @@ function QuickAddForm({
         style={[styles.input, { color: theme.text, backgroundColor: theme.background }]}
       />
 
-      <ThemedView style={styles.chipRow}>
-        {sections.map((section) => (
+      {sections.length > 0 && (
+        <View style={styles.chipRow}>
           <FilterChip
-            key={section.id}
-            label={section.name}
-            selected={selectedSectionId === section.id}
-            onPress={() => setSectionId(section.id)}
+            label="Sin sección"
+            selected={sectionId === undefined}
+            onPress={() => setSectionId(undefined)}
           />
-        ))}
-      </ThemedView>
+          {sections.map((section) => (
+            <FilterChip
+              key={section.id}
+              label={section.name}
+              selected={sectionId === section.id}
+              onPress={() => setSectionId(section.id)}
+            />
+          ))}
+        </View>
+      )}
 
       <Pressable onPress={handleSubmit} style={({ pressed }) => pressed && styles.pressed}>
         <ThemedView type="backgroundSelected" style={styles.submitButton}>

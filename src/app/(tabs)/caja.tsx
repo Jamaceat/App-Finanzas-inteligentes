@@ -39,23 +39,23 @@ const QUICK_ACTIONS: QuickAction[] = [
     label: 'Fijo',
     hint: 'Programado, mismo monto siempre',
     icon: symbol('checkmark.seal.fill', 'verified'),
-    enabled: false,
+    enabled: true,
   },
   {
     key: 'variable',
     label: 'Variable',
     hint: 'Programado, monto todavía no lo sabés',
     icon: symbol('questionmark.circle.fill', 'help'),
-    enabled: false,
+    enabled: true,
   },
 ];
 
-export default function HomeScreen() {
+export default function CajaScreen() {
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <ThemedText type="title" style={styles.title}>
-          Inicio
+          Caja
         </ThemedText>
 
         <View style={styles.columnsRow}>
@@ -102,6 +102,11 @@ function TransactionKindColumn({
           onPress={() => {
             if (action.key === 'now') {
               router.push({ pathname: '/transactions', params: { kind } });
+            } else {
+              router.push({
+                pathname: '/recurring-rules',
+                params: { kind, variable: action.key === 'variable' ? '1' : '0' },
+              });
             }
           }}
         />

@@ -5,8 +5,30 @@ import { sections } from '@/db/schema';
 
 export type SectionKind = (typeof sections.$inferSelect)['kind'];
 
+export const DEFAULT_SECTION_NAME = 'General';
+
 export function listActiveSections() {
   return db.select().from(sections).where(isNull(sections.archivedAt));
+}
+
+export async function getOrCreateDefaultSection() {
+  const existing = await db
+    .select()
+    .from(sections)
+    .where(and(eq(sections.name, DEFAULT_SECTION_NAME), isNull(sections.archivedAt)));
+
+  if (existing[0]) {
+    return existing[0];
+  }
+
+  const [created] = await createSection({
+    name: DEFAULT_SECTION_NAME,
+    icon: 'house',
+    color: '#60646C',
+    kind: 'both',
+  });
+
+  return created;
 }
 
 export function createSection(input: { name: string; icon: string; color: string; kind: SectionKind }) {

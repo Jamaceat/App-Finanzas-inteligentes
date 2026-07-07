@@ -2,6 +2,12 @@ import { and, desc, eq, gte, lte } from 'drizzle-orm';
 
 import { db } from '@/db/client';
 import { transactions } from '@/db/schema';
+import {
+  updateNextDueDate,
+  type CustomIntervalUnit,
+  type RecurringFrequency,
+} from '@/db/queries/recurring-rules';
+import { advanceDate } from '@/db/queries/tanks';
 
 export type TransactionKind = (typeof transactions.$inferSelect)['kind'];
 
@@ -24,10 +30,40 @@ export function createTransaction(input: {
   description?: string;
   occurredAt: Date;
   recurringRuleId?: number;
+  allocatedIncomeRuleId?: number;
 }) {
   return db.insert(transactions).values(input).returning();
 }
 
 export function deleteTransaction(id: number) {
   return db.delete(transactions).where(eq(transactions.id, id)).returning();
+}
+
+export async function allocateExpenseToIncomeTank(input: {
+  expenseRuleId: number;
+  incomeRuleId: number;
+  sectionId: number;
+  amount: number;
+  frequency: RecurringFrequency;
+  customIntervalValue?: number | null;
+  customIntervalUnit?: CustomIntervalUnit | null;
+  nextDueDate: Date;
+  description?: string;
+}) {
+  const [transaction] = await createTransaction({
+    sectionId: input.sectionId,
+    amount: input.amount,
+    kind: 'expense',
+    description: input.description,
+    occurredAt: new Date(),
+    recurringRuleId: input.expenseRuleId,
+    allocatedIncomeRuleId: input.incomeRuleId,
+  });
+
+  await updateNextDueDate(
+    input.expenseRuleId,
+    advanceDate(input.nextDueDate, input.frequency, input.customIntervalValue, input.customIntervalUnit),
+  );
+
+  return transaction;
 }

@@ -20,9 +20,19 @@ export default function AppTabs() {
         />
       </NativeTabs.Trigger>
 
+      <NativeTabs.Trigger name="caja">
+        <NativeTabs.Trigger.Label>Caja</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf="creditcard.fill" md="account_balance_wallet" />
+      </NativeTabs.Trigger>
+
       <NativeTabs.Trigger name="transactions">
         <NativeTabs.Trigger.Label>Movimientos</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf="list.bullet.rectangle" md="receipt_long" />
+      </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger name="sections">
+        <NativeTabs.Trigger.Label>Secciones</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf="tag.fill" md="sell" />
       </NativeTabs.Trigger>
     </NativeTabs>
   );
