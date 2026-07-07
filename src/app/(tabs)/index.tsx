@@ -27,6 +27,23 @@ function symbol(ios: SFSymbol, android: AndroidSymbol) {
   return { ios, android, web: android };
 }
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import {
+  EDGE_SCROLL_INTERVAL_MS,
+  EDGE_SCROLL_STEP,
+  EDGE_ZONE_WIDTH,
+  FREE_TANK_COLOR,
+  SEARCH_LONG_PRESS_DURATION_MS,
+  SEARCH_PRESS_RELEASE_DURATION_MS,
+  TANK_CAROUSEL_HEIGHT,
+  TANK_COLOR,
+  TANK_FILL_ANIMATION_DURATION_MS,
+  TANK_GAP,
+  TANK_HEIGHT,
+  TANK_ITEM_WIDTH,
+  TANK_LABEL_HEIGHT,
+  TANK_SNAP_INTERVAL,
+  TANK_WIDTH,
+} from '@/constants/constants';
 import { useDeviceTilt } from '@/hooks/use-device-tilt';
 import { useTheme } from '@/hooks/use-theme';
 import { listActiveRecurringRules } from '@/db/queries/recurring-rules';
@@ -39,21 +56,6 @@ import {
   type IncomeTank,
   type PendingExpense,
 } from '@/db/queries/tanks';
-
-const TANK_COLOR = '#0091FF';
-const FREE_TANK_COLOR = '#12A594';
-
-const TANK_WIDTH = 120;
-const TANK_ITEM_WIDTH = 140;
-const TANK_HEIGHT = 200;
-const TANK_LABEL_HEIGHT = 52;
-const TANK_GAP = 12;
-const TANK_SNAP_INTERVAL = TANK_ITEM_WIDTH + TANK_GAP;
-const TANK_CAROUSEL_HEIGHT = Math.ceil((TANK_HEIGHT + TANK_LABEL_HEIGHT) * 1.3) + Spacing.three;
-
-const EDGE_ZONE_WIDTH = 44;
-const EDGE_SCROLL_STEP = 14;
-const EDGE_SCROLL_INTERVAL_MS = 16;
 
 const currencyFormatter = new Intl.NumberFormat('es-AR', {
   style: 'currency',
@@ -83,7 +85,7 @@ export default function HomeScreen() {
   const handlePressIn = () => {
     setIsPressing(true);
     pressProgress.value = 0;
-    pressProgress.value = withTiming(1, { duration: 3000 }, (finished) => {
+    pressProgress.value = withTiming(1, { duration: SEARCH_LONG_PRESS_DURATION_MS }, (finished) => {
       if (finished) {
         runOnJS(openSearchModal)();
       }
@@ -93,7 +95,7 @@ export default function HomeScreen() {
   const handlePressOut = () => {
     setIsPressing(false);
     if (pressProgress.value < 1) {
-      pressProgress.value = withTiming(0, { duration: 150 });
+      pressProgress.value = withTiming(0, { duration: SEARCH_PRESS_RELEASE_DURATION_MS });
     }
   };
 
@@ -510,7 +512,7 @@ function Tank({
 }) {
   const ratio = Math.max(0, Math.min(1, amount / capacity));
   const fillStyle = useAnimatedStyle(() => ({
-    height: withTiming(`${ratio * 100}%`, { duration: 400 }),
+    height: withTiming(`${ratio * 100}%`, { duration: TANK_FILL_ANIMATION_DURATION_MS }),
     transform: [{ rotate: `${withSpring(tilt.value)}deg` }],
   }));
 
