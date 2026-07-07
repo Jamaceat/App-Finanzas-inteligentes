@@ -38,12 +38,12 @@ const TANK_COLOR = '#0091FF';
 const FREE_TANK_COLOR = '#12A594';
 
 const TANK_WIDTH = 120;
-const TANK_ITEM_WIDTH = 160;
+const TANK_ITEM_WIDTH = 140;
 const TANK_HEIGHT = 200;
 const TANK_LABEL_HEIGHT = 52;
-const TANK_GAP = Spacing.three;
+const TANK_GAP = 12;
 const TANK_SNAP_INTERVAL = TANK_ITEM_WIDTH + TANK_GAP;
-const TANK_CAROUSEL_HEIGHT = TANK_HEIGHT + TANK_LABEL_HEIGHT + Spacing.two;
+const TANK_CAROUSEL_HEIGHT = Math.ceil((TANK_HEIGHT + TANK_LABEL_HEIGHT) * 1.3) + Spacing.three;
 
 const EDGE_ZONE_WIDTH = 44;
 const EDGE_SCROLL_STEP = 14;
@@ -284,6 +284,27 @@ function TankCarousel({ children }: { children: React.ReactNode }) {
   );
 }
 
+function interpolateCustom(value: number, input: number[], output: number[]): number {
+  'worklet';
+  const len = input.length;
+  if (len === 0) return 0;
+  if (value <= input[0]) return output[0];
+  if (value >= input[len - 1]) return output[len - 1];
+  
+  for (let i = 0; i < len - 1; i++) {
+    const x0 = input[i];
+    const x1 = input[i + 1];
+    if (value >= x0 && value <= x1) {
+      const y0 = output[i];
+      const y1 = output[i + 1];
+      if (x1 === x0) return y0;
+      const t = (value - x0) / (x1 - x0);
+      return y0 + t * (y1 - y0);
+    }
+  }
+  return output[0];
+}
+
 function CoverflowItem({
   index,
   scrollX,
@@ -295,14 +316,31 @@ function CoverflowItem({
 }) {
   const animatedStyle = useAnimatedStyle(() => {
     const inputRange = [
+      (index - 3) * TANK_SNAP_INTERVAL,
+      (index - 2) * TANK_SNAP_INTERVAL,
       (index - 1) * TANK_SNAP_INTERVAL,
       index * TANK_SNAP_INTERVAL,
       (index + 1) * TANK_SNAP_INTERVAL,
+      (index + 2) * TANK_SNAP_INTERVAL,
+      (index + 3) * TANK_SNAP_INTERVAL,
     ];
-    const scale = interpolate(scrollX.value, inputRange, [0.72, 1, 0.72], Extrapolation.CLAMP);
-    const rotateY = interpolate(scrollX.value, inputRange, [40, 0, -40], Extrapolation.CLAMP);
-    const translateY = interpolate(scrollX.value, inputRange, [26, 0, 26], Extrapolation.CLAMP);
-    const opacity = interpolate(scrollX.value, inputRange, [0.5, 1, 0.5], Extrapolation.CLAMP);
+    
+    const scale = interpolateCustom(
+      scrollX.value,
+      inputRange,
+      [1.3, 1.15, 1.0, 0.85, 1.0, 1.15, 1.3]
+    );
+    const rotateY = interpolateCustom(
+      scrollX.value,
+      inputRange,
+      [-84, -56, -28, 0, 28, 56, 84]
+    );
+    const translateY = 0;
+    const opacity = interpolateCustom(
+      scrollX.value,
+      inputRange,
+      [0.0, 0.4, 0.9, 1.0, 0.9, 0.4, 0.0]
+    );
 
     return {
       opacity,
@@ -428,17 +466,18 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     maxWidth: MaxContentWidth,
-    paddingHorizontal: Spacing.four,
     paddingBottom: BottomTabInset + Spacing.three,
     gap: Spacing.four,
   },
   title: {
     fontSize: 28,
     lineHeight: 34,
+    paddingHorizontal: Spacing.four,
   },
   filterRow: {
     gap: Spacing.two,
     paddingBottom: Spacing.one,
+    paddingHorizontal: Spacing.four,
   },
   filterScrollView: {
     flexGrow: 0,
@@ -507,6 +546,7 @@ const styles = StyleSheet.create({
   },
   pendingSection: {
     gap: Spacing.two,
+    paddingHorizontal: Spacing.four,
   },
   pendingList: {
     gap: Spacing.two,

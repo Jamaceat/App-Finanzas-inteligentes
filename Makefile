@@ -1,4 +1,4 @@
-.PHONY: help install start start-tunnel android web clean reset dev-reset prebuild local-apk local-apk-rebuild local-apk-clean eas-login eas-config eas-apk eas-aab adb-reverse start-tablet open-tablet screenshot wsl-usb
+.PHONY: help install start start-tunnel android web clean reset dev-reset prebuild local-apk local-apk-rebuild local-apk-clean eas-login eas-config eas-apk eas-aab adb-reverse start-tablet open-tablet screenshot logs wsl-usb
 
 # Puerto para depuración móvil (configurable vía: make <target> PORT=xxxx)
 PORT ?= 8082
@@ -82,6 +82,13 @@ screenshot:
 	@mkdir -p screenshot
 	adb exec-out screencap -p > screenshot/screenshot.png
 	@echo "$(GREEN)Screenshot guardada en screenshot/screenshot.png$(RESET)"
+
+logs:
+	@echo "$(BLUE)Guardando logs del dispositivo...$(RESET)"
+	@mkdir -p logs
+	adb logcat -d > logs/logcat.txt
+	@echo "$(GREEN)Logs guardados en logs/logcat.txt$(RESET)"
+
 
 clean:
 	@echo "$(BLUE)Limpiando caché de Metro y carpeta de salida...$(RESET)"
