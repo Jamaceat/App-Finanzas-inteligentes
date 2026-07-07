@@ -1,6 +1,6 @@
 import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
 import { Children, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, View, type LayoutChangeEvent, type GestureResponderEvent } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -17,9 +17,15 @@ import Animated, {
   withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
+import { SymbolView, type AndroidSymbol, type SFSymbol } from 'expo-symbols';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { TankSearchModal, type SearchTankItem } from '@/components/tank-search-modal';
+
+function symbol(ios: SFSymbol, android: AndroidSymbol) {
+  return { ios, android, web: android };
+}
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import { useDeviceTilt } from '@/hooks/use-device-tilt';
 import { useTheme } from '@/hooks/use-theme';
@@ -65,11 +71,103 @@ export default function HomeScreen() {
   const { data: transactions } = useLiveQuery(listTransactions());
   const { data: sections } = useLiveQuery(listActiveSections());
   const tilt = useDeviceTilt();
+  const theme = useTheme();
+
+  const scrollRef = useAnimatedRef<Animated.ScrollView>();
   const [selectedSectionId, setSelectedSectionId] = useState<number | null>(null);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isPressing, setIsPressing] = useState(false);
+  const pressProgress = useSharedValue(0);
+
+  const handlePressIn = () => {
+    setIsPressing(true);
+    pressProgress.value = 0;
+    pressProgress.value = withTiming(1, { duration: 3000 }, (finished) => {
+      if (finished) {
+        runOnJS(openSearchModal)();
+      }
+    });
+  };
+
+  const handlePressOut = () => {
+    setIsPressing(false);
+    if (pressProgress.value < 1) {
+      pressProgress.value = withTiming(0, { duration: 150 });
+    }
+  };
+
+  const openSearchModal = () => {
+    setIsPressing(false);
+    pressProgress.value = 0;
+    setModalVisible(true);
+  };
 
   const incomeTanks = useMemo(() => computeIncomeTanks(rules, transactions), [rules, transactions]);
   const freeCash = useMemo(() => computeFreeCash(rules, transactions), [rules, transactions]);
   const pendingExpenses = useMemo(() => computePendingExpenses(rules), [rules]);
+
+  const allTanks = useMemo(() => {
+    const list: SearchTankItem[] = [
+      {
+        ruleId: undefined,
+        label: 'Libre',
+        amount: freeCash,
+        capacity: Math.max(freeCash, 1),
+        color: FREE_TANK_COLOR,
+      },
+    ];
+    incomeTanks.forEach((tank) => {
+      list.push({
+        ruleId: tank.ruleId,
+        label: tank.label,
+        amount: tank.level,
+        capacity: Math.max(tank.capacity, 1),
+        color: TANK_COLOR,
+      });
+    });
+    return list;
+  }, [freeCash, incomeTanks]);
+
+  const handleSelectTank = (selected: SearchTankItem) => {
+    setModalVisible(false);
+    setSearchQuery('');
+    setSelectedSectionId(null);
+
+    let targetIndex = 0;
+    if (selected.ruleId !== undefined) {
+      const idx = incomeTanks.findIndex((t) => t.ruleId === selected.ruleId);
+      if (idx !== -1) {
+        targetIndex = idx + 1;
+      }
+    }
+
+    setTimeout(() => {
+      runOnUI(() => {
+        scrollTo(scrollRef, targetIndex * TANK_SNAP_INTERVAL, 0, true);
+      })();
+    }, 100);
+  };
+
+  const outerRingStyle = useAnimatedStyle(() => {
+    return {
+      transform: [
+        { scale: interpolate(pressProgress.value, [0, 1], [0.8, 2.0]) },
+      ],
+      opacity: interpolate(pressProgress.value, [0, 0.1, 0.9, 1], [0, 1, 1, 0]),
+      borderColor: TANK_COLOR,
+    };
+  });
+
+  const innerCircleStyle = useAnimatedStyle(() => {
+    return {
+      transform: [
+        { scale: pressProgress.value },
+      ],
+      opacity: interpolate(pressProgress.value, [0, 1], [0, 0.4]),
+      backgroundColor: TANK_COLOR,
+    };
+  });
 
   const sectionFilters = useMemo(() => {
     const usedSectionIds = new Set(incomeTanks.map((tank) => tank.sectionId));
@@ -138,7 +236,30 @@ export default function HomeScreen() {
           ))}
         </ScrollView>
 
-        <TankCarousel>
+        <View style={styles.searchButtonContainerCentered}>
+          {isPressing && (
+            <>
+              <Animated.View style={[styles.pressOuterRing, outerRingStyle]} />
+              <Animated.View style={[styles.pressInnerCircle, innerCircleStyle]} />
+            </>
+          )}
+          <Pressable
+            onPressIn={handlePressIn}
+            onPressOut={handlePressOut}
+            style={[
+              styles.searchButton,
+              { backgroundColor: theme.backgroundElement },
+            ]}
+          >
+            <SymbolView
+              name={symbol('magnifyingglass', 'search')}
+              tintColor={theme.text}
+              size={22}
+            />
+          </Pressable>
+        </View>
+
+        <TankCarousel scrollRef={scrollRef}>
           <Tank
             label="Libre"
             amount={freeCash}
@@ -181,6 +302,17 @@ export default function HomeScreen() {
             ))}
           </View>
         </View>
+        <TankSearchModal
+          visible={modalVisible}
+          onClose={() => {
+            setModalVisible(false);
+            setSearchQuery('');
+          }}
+          tanks={allTanks}
+          searchQuery={searchQuery}
+          onSearchQueryChange={setSearchQuery}
+          onSelectTank={handleSelectTank}
+        />
       </SafeAreaView>
     </ThemedView>
   );
@@ -211,8 +343,13 @@ function FilterChip({
   );
 }
 
-function TankCarousel({ children }: { children: React.ReactNode }) {
-  const scrollRef = useAnimatedRef<Animated.ScrollView>();
+function TankCarousel({
+  children,
+  scrollRef,
+}: {
+  children: React.ReactNode;
+  scrollRef: any;
+}) {
   const scrollX = useSharedValue(0);
   const scrollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -473,6 +610,35 @@ const styles = StyleSheet.create({
     fontSize: 28,
     lineHeight: 34,
     paddingHorizontal: Spacing.four,
+  },
+  searchButtonContainerCentered: {
+    alignSelf: 'center',
+    position: 'relative',
+    width: 44,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginVertical: Spacing.half,
+  },
+  searchButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pressOuterRing: {
+    position: 'absolute',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 2,
+  },
+  pressInnerCircle: {
+    position: 'absolute',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
   },
   filterRow: {
     gap: Spacing.two,
