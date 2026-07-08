@@ -317,3 +317,49 @@ export function computePendingExpenses(rules: Rule[]): PendingExpense[] {
       nextDueDate: rule.nextDueDate,
     }));
 }
+
+export type PendingConfirmation = {
+  ruleId: number;
+  sectionId: number;
+  label: string;
+  kind: 'income' | 'expense';
+  isVariableAmount: boolean;
+  estimatedAmount: number | null;
+  frequency: RecurringFrequency;
+  customIntervalValue: number | null;
+  customIntervalUnit: CustomIntervalUnit | null;
+  occurrences: Date[];
+  nextDueAfter: Date;
+};
+
+export function computePendingConfirmations(
+  rules: Rule[],
+  kind: 'income' | 'expense',
+): PendingConfirmation[] {
+  const now = new Date();
+  return rules
+    .filter((rule) => rule.kind === kind && !rule.archivedAt && rule.nextDueDate < now)
+    .map((rule) => {
+      const occurrences: Date[] = [];
+      let current = rule.nextDueDate;
+      let iterations = 0;
+      while (current < now && iterations < 500) {
+        occurrences.push(current);
+        current = advanceDate(current, rule.frequency, rule.customIntervalValue, rule.customIntervalUnit);
+        iterations++;
+      }
+      return {
+        ruleId: rule.id,
+        sectionId: rule.sectionId,
+        label: rule.label,
+        kind,
+        isVariableAmount: rule.isVariableAmount,
+        estimatedAmount: rule.estimatedAmount,
+        frequency: rule.frequency,
+        customIntervalValue: rule.customIntervalValue,
+        customIntervalUnit: rule.customIntervalUnit,
+        occurrences,
+        nextDueAfter: current,
+      };
+    });
+}

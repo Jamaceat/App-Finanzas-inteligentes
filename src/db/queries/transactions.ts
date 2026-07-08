@@ -99,3 +99,31 @@ export async function allocateExpenseToIncomeTank(input: {
 
   return transaction;
 }
+
+export async function confirmRecurringOccurrences(input: {
+  ruleId: number;
+  sectionId: number;
+  kind: TransactionKind;
+  description?: string;
+  allocatedIncomeRuleId?: number | null;
+  occurrences: { occurredAt: Date; amount: number }[];
+  nextDueDate: Date;
+}) {
+  const created = [];
+  for (const occurrence of input.occurrences) {
+    const [transaction] = await createTransaction({
+      sectionId: input.sectionId,
+      amount: occurrence.amount,
+      kind: input.kind,
+      description: input.description,
+      occurredAt: occurrence.occurredAt,
+      recurringRuleId: input.ruleId,
+      allocatedIncomeRuleId: input.allocatedIncomeRuleId ?? undefined,
+    });
+    created.push(transaction);
+  }
+
+  await updateNextDueDate(input.ruleId, input.nextDueDate);
+
+  return created;
+}

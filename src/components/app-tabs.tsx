@@ -35,6 +35,11 @@ export default function AppTabs() {
         <NativeTabs.Trigger.Icon sf="tag.fill" md="sell" />
       </NativeTabs.Trigger>
 
+      <NativeTabs.Trigger name="confirmar">
+        <NativeTabs.Trigger.Label>Confirmar</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf="checkmark.circle.fill" md="check_circle" />
+      </NativeTabs.Trigger>
+
       <NativeTabs.Trigger name="settings">
         <NativeTabs.Trigger.Label>Ajustes</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf="gearshape.fill" md="settings" />

@@ -48,7 +48,7 @@ import {
 } from '@/constants/constants';
 import { useDeviceTilt } from '@/hooks/use-device-tilt';
 import { useTheme } from '@/hooks/use-theme';
-import { listActiveRecurringRules, rolloverDueIncomeRules } from '@/db/queries/recurring-rules';
+import { listActiveRecurringRules } from '@/db/queries/recurring-rules';
 import { listActiveSections } from '@/db/queries/sections';
 import { watchAppSettingsRow } from '@/db/queries/settings';
 import { listTransactions, allocateExpenseToIncomeTank } from '@/db/queries/transactions';
@@ -92,10 +92,6 @@ export default function HomeScreen() {
   const settings = settingsRows[0] ?? { tankMaxRenewalValue: 30, tankMaxRenewalUnit: 'days' as const };
   const tilt = useDeviceTilt();
   const theme = useTheme();
-
-  useEffect(() => {
-    rolloverDueIncomeRules(rules);
-  }, [rules]);
 
   const scrollRef = useAnimatedRef<Animated.ScrollView>();
   const [selectedSectionId, setSelectedSectionId] = useState<number | null>(null);
