@@ -27,3 +27,8 @@ export const TANK_FILL_ANIMATION_DURATION_MS = 400;
 
 // Calendario — cantidad de ocurrencias por defecto a simular en la regla recurrente
 export const DEFAULT_SIMULATION_OCCURRENCES = 24;
+
+// Asignar gastos — animación de entrada de las burbujas de gasto (fly-out escalonado, sin rebote)
+export const EXPENSE_POINT_ENTRANCE_BASE_DELAY_MS = 80;
+export const EXPENSE_POINT_ENTRANCE_STAGGER_MS = 40;
+export const EXPENSE_POINT_ENTRANCE_DURATION_MS = 400;

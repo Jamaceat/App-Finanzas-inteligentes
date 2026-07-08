@@ -20,7 +20,12 @@ import { SymbolView, type AndroidSymbol, type SFSymbol } from 'expo-symbols';
 
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
-import { TANK_COLOR } from '@/constants/constants';
+import {
+  TANK_COLOR,
+  EXPENSE_POINT_ENTRANCE_BASE_DELAY_MS,
+  EXPENSE_POINT_ENTRANCE_STAGGER_MS,
+  EXPENSE_POINT_ENTRANCE_DURATION_MS,
+} from '@/constants/constants';
 import { useTheme } from '@/hooks/use-theme';
 
 function symbol(ios: SFSymbol, android: AndroidSymbol) {
@@ -95,6 +100,7 @@ export function FloatingExpensePoint({
   const isDimmed = anyFocused && !isFocused;
 
   const [assigningTankId, setAssigningTankId] = useState<number | null>(null);
+  const [isFreeDragFront, setIsFreeDragFront] = useState(false);
 
   const translateX = useSharedValue(screenWidth - 65 - initialX);
   const translateY = useSharedValue(screenHeight - 65 - initialY);
@@ -127,14 +133,17 @@ export function FloatingExpensePoint({
     } else {
       isMountedRef.current = true;
       // Stagger fly-out delay so bubbles pop out sequentially after modal/screen load finishes
-      const baseDelay = 200;
       const charCode = label.charCodeAt(0) || 0;
-      const stagger = (charCode % 4) * 80;
-      const delay = baseDelay + stagger;
+      const stagger = (charCode % 4) * EXPENSE_POINT_ENTRANCE_STAGGER_MS;
+      const delay = EXPENSE_POINT_ENTRANCE_BASE_DELAY_MS + stagger;
 
-      pillScale.value = withDelay(delay, withSpring(1, { damping: 18, stiffness: 85 }));
-      translateX.value = withDelay(delay, withSpring(originX - initialX, { damping: 20, stiffness: 75 }));
-      translateY.value = withDelay(delay, withSpring(originY - initialY, { damping: 20, stiffness: 75 }));
+      const entranceTiming = {
+        duration: EXPENSE_POINT_ENTRANCE_DURATION_MS,
+        easing: Easing.out(Easing.cubic),
+      };
+      pillScale.value = withDelay(delay, withTiming(1, entranceTiming));
+      translateX.value = withDelay(delay, withTiming(originX - initialX, entranceTiming));
+      translateY.value = withDelay(delay, withTiming(originY - initialY, entranceTiming));
     }
   }, [originX, originY, initialX, initialY, translateX, translateY, isDragging, isFreeDragging, pillScale, label]);
 
@@ -171,15 +180,25 @@ export function FloatingExpensePoint({
     }
   }, [isFocused, wanderX, wanderY]);
 
+  const skipFocusMountRef = useRef(true);
   // Handle pill scale spring on focus (accelerated)
   useEffect(() => {
+    if (skipFocusMountRef.current) {
+      skipFocusMountRef.current = false;
+      return;
+    }
     if (assigningTankId === null) {
       pillScale.value = withSpring(isFocused ? 1.15 : 1, { damping: 15, stiffness: 180 });
     }
   }, [isFocused, assigningTankId, pillScale]);
 
+  const skipCenterFlightMountRef = useRef(true);
   // Center flight trigger (accelerated)
   useEffect(() => {
+    if (skipCenterFlightMountRef.current) {
+      skipCenterFlightMountRef.current = false;
+      return;
+    }
     if (assigningTankId !== null) return;
     if (isFocused) {
       if (!isDragging.value) {
@@ -257,6 +276,7 @@ export function FloatingExpensePoint({
         translateY.value = withSpring(clampedY - initialY, { damping: 20, stiffness: 200 });
       } else {
         isFreeDragging.value = true;
+        runOnJS(setIsFreeDragFront)(true);
       }
     })
     .onUpdate((event) => {
@@ -352,6 +372,7 @@ export function FloatingExpensePoint({
         const clampedX = Math.max(POINT_WIDTH / 2, Math.min(screenWidth - POINT_WIDTH / 2, targetX));
         const clampedY = Math.max(POINT_HEIGHT / 2, Math.min(screenHeight - POINT_HEIGHT / 2, targetY));
         runOnJS(onPositionChange)(pointKey, clampedX, clampedY);
+        runOnJS(setIsFreeDragFront)(false);
         startWander();
       }
     });
@@ -396,9 +417,9 @@ export function FloatingExpensePoint({
       style={[
         styles.wrapper, 
         { 
-          left: initialX - POINT_WIDTH / 2, 
+          left: initialX - POINT_WIDTH / 2,
           top: initialY - POINT_HEIGHT / 2,
-          zIndex: isFocused ? 20 : 1,
+          zIndex: isFocused || isFreeDragFront ? 20 : 1,
         }
       ]}
       pointerEvents={isDimmed ? "none" : "box-none"}

@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Modal, Pressable, StyleSheet, View, Vibration, BackHandler, useWindowDimensions } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { SymbolView, type AndroidSymbol, type SFSymbol } from 'expo-symbols';
 import Svg, { Path } from 'react-native-svg';
 import Animated, {
   Easing,
   interpolate,
   interpolateColor,
+  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withDelay,
@@ -457,13 +459,14 @@ function FloatingBubble({
 }) {
   const wanderX = useSharedValue(0);
   const wanderY = useSharedValue(0);
+  const dragX = useSharedValue(0);
+  const dragY = useSharedValue(0);
   const scale = useSharedValue(0.4);
   const opacity = useSharedValue(0);
+  const [isFront, setIsFront] = useState(false);
 
-  useEffect(() => {
-    scale.value = withSpring(1, { damping: 14, stiffness: 160 });
-    opacity.value = withTiming(1, { duration: 200 });
-
+  const startWander = () => {
+    'worklet';
     const amp = 12 + Math.random() * 12;
     const dur = 2200 + Math.random() * 1800;
     wanderX.value = withRepeat(
@@ -482,26 +485,62 @@ function FloatingBubble({
       -1,
       true,
     );
-  }, [opacity, scale, wanderX, wanderY]);
+  };
+
+  useEffect(() => {
+    scale.value = withSpring(1, { damping: 14, stiffness: 160 });
+    opacity.value = withTiming(1, { duration: 200 });
+    startWander();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const { left, top } = useMemo(() => layoutForIndex(index, total), [index, total]);
 
+  const pan = Gesture.Pan()
+    .onBegin(() => {
+      wanderX.value = withTiming(0, { duration: 150 });
+      wanderY.value = withTiming(0, { duration: 150 });
+      runOnJS(setIsFront)(true);
+    })
+    .onUpdate((event) => {
+      dragX.value = event.translationX;
+      dragY.value = event.translationY;
+    })
+    .onEnd(() => {
+      dragX.value = withSpring(0, { damping: 16, stiffness: 140 });
+      dragY.value = withSpring(0, { damping: 16, stiffness: 140 });
+      startWander();
+      runOnJS(setIsFront)(false);
+    });
+
+  const tap = Gesture.Tap().onEnd(() => {
+    runOnJS(onPress)();
+  });
+
+  const gesture = Gesture.Exclusive(pan, tap);
+
   const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: wanderX.value }, { translateY: wanderY.value }, { scale: scale.value }],
+    transform: [
+      { translateX: wanderX.value + dragX.value },
+      { translateY: wanderY.value + dragY.value },
+      { scale: scale.value },
+    ],
     opacity: opacity.value,
   }));
 
   return (
-    <Pressable onPress={onPress} style={[styles.bubbleWrapper, { left: `${left}%`, top: `${top}%` }]}>
-      <Animated.View style={[styles.bubble, animatedStyle, { backgroundColor: color, shadowColor: color }]}>
-        <ThemedText type="smallBold" style={styles.bubbleLabel} numberOfLines={1}>
-          {label}
-        </ThemedText>
-        <ThemedText style={styles.bubbleSublabel} numberOfLines={1}>
-          {sublabel}
-        </ThemedText>
-      </Animated.View>
-    </Pressable>
+    <GestureDetector gesture={gesture}>
+      <View style={[styles.bubbleWrapper, { left: `${left}%`, top: `${top}%`, zIndex: isFront ? 20 : 1 }]}>
+        <Animated.View style={[styles.bubble, animatedStyle, { backgroundColor: color, shadowColor: color }]}>
+          <ThemedText type="smallBold" style={styles.bubbleLabel} numberOfLines={1}>
+            {label}
+          </ThemedText>
+          <ThemedText style={styles.bubbleSublabel} numberOfLines={1}>
+            {sublabel}
+          </ThemedText>
+        </Animated.View>
+      </View>
+    </GestureDetector>
   );
 }
 
