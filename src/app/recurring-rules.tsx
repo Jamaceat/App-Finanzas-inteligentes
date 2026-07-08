@@ -460,6 +460,12 @@ function MiniCalendar({
     setViewDate(new Date(year, month + delta, 1));
   }
 
+  function goToToday() {
+    const today = new Date();
+    setViewDate(new Date(today.getFullYear(), today.getMonth(), 1));
+    onChange(today);
+  }
+
   const gridWidth = containerWidth > 0 ? Math.round(containerWidth - Spacing.two * 2) : 0;
   const cellWidth = gridWidth > 0 ? Math.floor(gridWidth / 7) : undefined;
   const daySize = cellWidth ? Math.floor(cellWidth * 0.8) : undefined;
@@ -498,6 +504,15 @@ function MiniCalendar({
           <ThemedText style={styles.monthNavText}>›</ThemedText>
         </Pressable>
       </View>
+
+      <Pressable
+        onPress={goToToday}
+        style={({ pressed }) => [styles.todayButton, pressed && styles.pressed]}
+      >
+        <ThemedText type="small" themeColor="textSecondary">
+          Hoy
+        </ThemedText>
+      </Pressable>
 
       <View style={styles.calendarWeekRow}>
         {WEEKDAY_LABELS.map((label, index) => (
@@ -673,6 +688,12 @@ const styles = StyleSheet.create({
     fontSize: 24,
     lineHeight: 24,
     fontWeight: 'bold',
+  },
+  todayButton: {
+    alignSelf: 'center',
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.one,
+    marginBottom: Spacing.one,
   },
   calendarWeekRow: {
     flexDirection: 'row',
