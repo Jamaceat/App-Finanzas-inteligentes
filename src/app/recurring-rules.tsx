@@ -62,7 +62,14 @@ type Rule = {
   estimatedAmount: number | null;
   nextDueDate: Date;
   reminderEnabled: boolean;
+  createdAt: Date;
 };
+
+const createdAtFormatter = new Intl.DateTimeFormat('es-AR', {
+  day: '2-digit',
+  month: 'long',
+  year: 'numeric',
+});
 
 function frequencyDescription(rule: Rule): string | undefined {
   const option = FREQUENCY_OPTIONS.find((o) => o.value === rule.frequency);
@@ -83,6 +90,7 @@ export default function RecurringRulesScreen() {
 
   const editingRule = rules.find((rule) => rule.id === editingId);
   const simulationOccurrences = settings?.calendarSimulationOccurrences ?? DEFAULT_SIMULATION_OCCURRENCES;
+  const restrictPastStartDates = settings?.restrictPastStartDates ?? false;
 
   return (
     <ThemedView style={styles.container}>
@@ -103,6 +111,7 @@ export default function RecurringRulesScreen() {
             initialKind={params.kind}
             initialVariable={params.variable === '1'}
             simulationOccurrences={simulationOccurrences}
+            restrictPastStartDates={restrictPastStartDates}
             onDone={() => setEditingId(null)}
           />
 
@@ -181,6 +190,7 @@ function RuleForm({
   initialKind,
   initialVariable,
   simulationOccurrences,
+  restrictPastStartDates,
   onDone,
 }: {
   editing?: Rule;
@@ -188,6 +198,7 @@ function RuleForm({
   initialKind?: RecurringKind;
   initialVariable?: boolean;
   simulationOccurrences: number;
+  restrictPastStartDates: boolean;
   onDone: () => void;
 }) {
   const theme = useTheme();
@@ -207,7 +218,11 @@ function RuleForm({
     editing?.estimatedAmount != null ? String(Math.round(editing.estimatedAmount * 100)) : '',
   );
   const [sectionId, setSectionId] = useState<number | undefined>(editing?.sectionId);
-  const [startDate, setStartDate] = useState<Date>(editing?.nextDueDate ?? new Date());
+  const [startDate, setStartDate] = useState<Date>(() => {
+    const initial = editing?.nextDueDate ?? new Date();
+    const today = startOfToday();
+    return restrictPastStartDates && initial < today ? today : initial;
+  });
   const [reminderEnabled, setReminderEnabled] = useState(editing?.reminderEnabled ?? true);
 
   const formattedAmount = formatCurrencyInput(amountDigits);
@@ -284,124 +299,138 @@ function RuleForm({
   }
 
   return (
-    <ThemedView type="backgroundElement" style={styles.form}>
-      <TextInput
-        value={label}
-        onChangeText={setLabel}
-        placeholder="Nombre (ej. Alquiler, Sueldo)"
-        placeholderTextColor={theme.textSecondary}
-        style={[styles.input, { color: theme.text, backgroundColor: theme.background }]}
-      />
-
-      <View style={styles.chipRow}>
-        <Chip label="Gasto" selected={kind === 'expense'} onPress={() => setKind('expense')} />
-        <Chip label="Ingreso" selected={kind === 'income'} onPress={() => setKind('income')} />
-      </View>
-
-      <View style={styles.chipRow}>
-        {FREQUENCY_OPTIONS.map((option) => (
-          <Chip
-            key={option.value}
-            label={option.label}
-            selected={frequency === option.value}
-            onPress={() => setFrequency(option.value)}
-          />
-        ))}
-      </View>
-
-      {frequency === 'custom' && (
-        <View style={styles.customRow}>
-          <TextInput
-            value={customValue}
-            onChangeText={handleCustomValueChange}
-            placeholder="Cada..."
-            placeholderTextColor={theme.textSecondary}
-            keyboardType="number-pad"
-            style={[styles.customInput, { color: theme.text, backgroundColor: theme.background }]}
-          />
-          <View style={styles.chipRow}>
-            {CUSTOM_UNIT_OPTIONS.map((option) => (
-              <Chip
-                key={option.value}
-                label={option.label}
-                selected={customUnit === option.value}
-                onPress={() => setCustomUnit(option.value)}
-              />
-            ))}
-          </View>
-        </View>
+    <View style={styles.formWrapper}>
+      {editing && (
+        <ThemedText type="small" themeColor="textSecondary" style={styles.createdAtText}>
+          Creada el {createdAtFormatter.format(editing.createdAt)}
+        </ThemedText>
       )}
-
-      <View style={styles.chipRow}>
-        <Chip label="Fijo" selected={!isVariableAmount} onPress={() => setIsVariableAmount(false)} />
-        <Chip label="Variable" selected={isVariableAmount} onPress={() => setIsVariableAmount(true)} />
-      </View>
-
-      {!isVariableAmount && (
+      <ThemedView type="backgroundElement" style={styles.form}>
         <TextInput
-          value={formattedAmount}
-          onChangeText={handleAmountChange}
-          placeholder="Monto estimado"
+          value={label}
+          onChangeText={setLabel}
+          placeholder="Nombre (ej. Alquiler, Sueldo)"
           placeholderTextColor={theme.textSecondary}
-          keyboardType="number-pad"
           style={[styles.input, { color: theme.text, backgroundColor: theme.background }]}
         />
-      )}
 
-      {sections.length > 0 && (
         <View style={styles.chipRow}>
-          {sections.map((section) => (
+          <Chip label="Gasto" selected={kind === 'expense'} onPress={() => setKind('expense')} />
+          <Chip label="Ingreso" selected={kind === 'income'} onPress={() => setKind('income')} />
+        </View>
+
+        <View style={styles.chipRow}>
+          {FREQUENCY_OPTIONS.map((option) => (
             <Chip
-              key={section.id}
-              label={section.name}
-              selected={sectionId === section.id}
-              onPress={() => setSectionId(section.id)}
+              key={option.value}
+              label={option.label}
+              selected={frequency === option.value}
+              onPress={() => setFrequency(option.value)}
             />
           ))}
         </View>
-      )}
 
-      <View style={styles.chipRow}>
-        <Chip
-          label="Recordatorio activado"
-          selected={reminderEnabled}
-          onPress={() => setReminderEnabled(true)}
+        {frequency === 'custom' && (
+          <View style={styles.customRow}>
+            <TextInput
+              value={customValue}
+              onChangeText={handleCustomValueChange}
+              placeholder="Cada..."
+              placeholderTextColor={theme.textSecondary}
+              keyboardType="number-pad"
+              style={[styles.customInput, { color: theme.text, backgroundColor: theme.background }]}
+            />
+            <View style={styles.chipRow}>
+              {CUSTOM_UNIT_OPTIONS.map((option) => (
+                <Chip
+                  key={option.value}
+                  label={option.label}
+                  selected={customUnit === option.value}
+                  onPress={() => setCustomUnit(option.value)}
+                />
+              ))}
+            </View>
+          </View>
+        )}
+
+        <View style={styles.chipRow}>
+          <Chip label="Fijo" selected={!isVariableAmount} onPress={() => setIsVariableAmount(false)} />
+          <Chip label="Variable" selected={isVariableAmount} onPress={() => setIsVariableAmount(true)} />
+        </View>
+
+        {!isVariableAmount && (
+          <TextInput
+            value={formattedAmount}
+            onChangeText={handleAmountChange}
+            placeholder="Monto estimado"
+            placeholderTextColor={theme.textSecondary}
+            keyboardType="number-pad"
+            style={[styles.input, { color: theme.text, backgroundColor: theme.background }]}
+          />
+        )}
+
+        {sections.length > 0 && (
+          <View style={styles.chipRow}>
+            {sections.map((section) => (
+              <Chip
+                key={section.id}
+                label={section.name}
+                selected={sectionId === section.id}
+                onPress={() => setSectionId(section.id)}
+              />
+            ))}
+          </View>
+        )}
+
+        <View style={styles.chipRow}>
+          <Chip
+            label="Recordatorio activado"
+            selected={reminderEnabled}
+            onPress={() => setReminderEnabled(true)}
+          />
+          <Chip
+            label="Sin recordatorio"
+            selected={!reminderEnabled}
+            onPress={() => setReminderEnabled(false)}
+          />
+        </View>
+
+        <ThemedText type="small" themeColor="textSecondary">
+          Punto de partida
+        </ThemedText>
+        <MiniCalendar
+          value={startDate}
+          onChange={setStartDate}
+          highlightDates={upcomingDates}
+          highlightColor={kind === 'income' ? '#30A46C' : '#E5484D'}
+          minDate={restrictPastStartDates ? startOfToday() : undefined}
+          originStartDate={editing?.nextDueDate}
         />
-        <Chip
-          label="Sin recordatorio"
-          selected={!reminderEnabled}
-          onPress={() => setReminderEnabled(false)}
-        />
-      </View>
 
-      <ThemedText type="small" themeColor="textSecondary">
-        Punto de partida
-      </ThemedText>
-      <MiniCalendar
-        value={startDate}
-        onChange={setStartDate}
-        highlightDates={upcomingDates}
-        highlightColor={kind === 'income' ? '#30A46C' : '#E5484D'}
-      />
-
-      <View style={styles.formActions}>
-        {editing && (
-          <Pressable onPress={onDone} style={({ pressed }) => pressed && styles.pressed}>
-            <ThemedView type="background" style={styles.submitButton}>
-              <ThemedText type="smallBold">Cancelar</ThemedText>
+        <View style={styles.formActions}>
+          {editing && (
+            <Pressable onPress={onDone} style={({ pressed }) => pressed && styles.pressed}>
+              <ThemedView type="background" style={styles.submitButton}>
+                <ThemedText type="smallBold">Cancelar</ThemedText>
+              </ThemedView>
+            </Pressable>
+          )}
+          <Pressable
+            onPress={handleSubmit}
+            style={({ pressed }) => [styles.submitFlex, pressed && styles.pressed]}>
+            <ThemedView type="backgroundSelected" style={styles.submitButton}>
+              <ThemedText type="smallBold">{editing ? 'Guardar' : 'Crear regla'}</ThemedText>
             </ThemedView>
           </Pressable>
-        )}
-        <Pressable
-          onPress={handleSubmit}
-          style={({ pressed }) => [styles.submitFlex, pressed && styles.pressed]}>
-          <ThemedView type="backgroundSelected" style={styles.submitButton}>
-            <ThemedText type="smallBold">{editing ? 'Guardar' : 'Crear regla'}</ThemedText>
-          </ThemedView>
-        </Pressable>
-      </View>
-    </ThemedView>
+        </View>
+      </ThemedView>
+    </View>
   );
+}
+
+function startOfToday(): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
 }
 
 function simulateOccurrences(
@@ -420,6 +449,8 @@ function simulateOccurrences(
   return dates;
 }
 
+const ORIGIN_COLOR = '#0091FF';
+
 const WEEKDAY_LABELS = ['D', 'L', 'M', 'M', 'J', 'V', 'S'];
 
 function isSameDay(a: Date, b: Date): boolean {
@@ -435,11 +466,15 @@ function MiniCalendar({
   onChange,
   highlightDates,
   highlightColor,
+  minDate,
+  originStartDate,
 }: {
   value: Date;
   onChange: (date: Date) => void;
   highlightDates: Date[];
   highlightColor: string;
+  minDate?: Date;
+  originStartDate?: Date;
 }) {
   const theme = useTheme();
   const [viewDate, setViewDate] = useState(new Date(value.getFullYear(), value.getMonth(), 1));
@@ -466,6 +501,11 @@ function MiniCalendar({
     const today = new Date();
     setViewDate(new Date(today.getFullYear(), today.getMonth(), 1));
     onChange(today);
+  }
+
+  function goToOrigin() {
+    if (!originStartDate) return;
+    setViewDate(new Date(originStartDate.getFullYear(), originStartDate.getMonth(), 1));
   }
 
   const gridWidth = containerWidth > 0 ? Math.round(containerWidth - Spacing.two * 2) : 0;
@@ -507,14 +547,26 @@ function MiniCalendar({
         </Pressable>
       </View>
 
-      <Pressable
-        onPress={goToToday}
-        style={({ pressed }) => [styles.todayButton, pressed && styles.pressed]}
-      >
-        <ThemedText type="small" themeColor="textSecondary">
-          Hoy
-        </ThemedText>
-      </Pressable>
+      <View style={styles.calendarActionsRow}>
+        <Pressable
+          onPress={goToToday}
+          style={({ pressed }) => [styles.todayButton, pressed && styles.pressed]}
+        >
+          <ThemedText type="small" themeColor="textSecondary">
+            Hoy
+          </ThemedText>
+        </Pressable>
+        {originStartDate && (
+          <Pressable
+            onPress={goToOrigin}
+            style={({ pressed }) => [styles.todayButton, pressed && styles.pressed]}
+          >
+            <ThemedText type="small" themeColor="textSecondary">
+              Inicio del ciclo
+            </ThemedText>
+          </Pressable>
+        )}
+      </View>
 
       <View style={styles.calendarWeekRow}>
         {WEEKDAY_LABELS.map((label, index) => (
@@ -534,10 +586,13 @@ function MiniCalendar({
 
           const isSelected = isSameDay(date, value);
           const isHighlighted = !isSelected && highlightDates.some((d) => isSameDay(d, date));
+          const isDisabled = minDate != null && date < minDate && !isSameDay(date, minDate);
+          const isOrigin = originStartDate != null && isSameDay(date, originStartDate);
 
           return (
             <Pressable
               key={index}
+              disabled={isDisabled}
               onPress={() => onChange(date)}
               style={({ pressed }) => [styles.calendarCell, cellStyle, pressed && styles.pressed]}
             >
@@ -546,13 +601,27 @@ function MiniCalendar({
                   styles.calendarDay,
                   dayStyle,
                   {
-                    backgroundColor: isSelected ? theme.backgroundSelected : 'transparent',
-                    borderColor: isHighlighted ? highlightColor : 'transparent',
-                    borderWidth: 1.5,
+                    backgroundColor: isOrigin && !isSelected
+                      ? ORIGIN_COLOR
+                      : isSelected
+                        ? theme.backgroundSelected
+                        : 'transparent',
+                    borderColor: isOrigin
+                      ? ORIGIN_COLOR
+                      : isHighlighted
+                        ? highlightColor
+                        : 'transparent',
+                    borderWidth: isOrigin ? 2.5 : 1.5,
+                    opacity: isDisabled ? 0.3 : 1,
                   },
                 ]}
               >
-                <ThemedText type="small">{date.getDate()}</ThemedText>
+                <ThemedText
+                  type="small"
+                  style={isOrigin && !isSelected ? styles.originDayText : undefined}
+                >
+                  {date.getDate()}
+                </ThemedText>
               </View>
             </Pressable>
           );
@@ -602,6 +671,12 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     lineHeight: 34,
+  },
+  formWrapper: {
+    gap: Spacing.one,
+  },
+  createdAtText: {
+    paddingHorizontal: Spacing.one,
   },
   form: {
     gap: Spacing.two,
@@ -691,11 +766,20 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     fontWeight: 'bold',
   },
+  calendarActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: Spacing.one,
+  },
   todayButton: {
     alignSelf: 'center',
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.one,
-    marginBottom: Spacing.one,
+  },
+  originDayText: {
+    color: '#ffffff',
+    fontWeight: '700',
   },
   calendarWeekRow: {
     flexDirection: 'row',

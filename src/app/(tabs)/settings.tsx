@@ -19,6 +19,7 @@ import {
   watchAppSettingsRow,
   updateVibrationEnabled,
   updateCalendarSimulationOccurrences,
+  updateRestrictPastStartDates,
   type TankMaxRenewalUnit,
 } from '@/db/queries/settings';
 
@@ -56,6 +57,7 @@ export default function SettingsScreen() {
               <RenewalForm value={row.tankMaxRenewalValue} unit={row.tankMaxRenewalUnit} />
               <SimulationForm value={row.calendarSimulationOccurrences} />
               <VibrationForm enabled={row.vibrationEnabled} />
+              <RestrictPastDatesForm enabled={row.restrictPastStartDates} />
             </View>
           )}
         </ScrollView>
@@ -160,6 +162,27 @@ function VibrationForm({ enabled }: { enabled: boolean }) {
           <ThemedText type="smallBold">Vibración al asignar gastos</ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
             El dispositivo vibrará brevemente al arrastrar o tocar un gasto para asignarlo a un tanque.
+          </ThemedText>
+        </View>
+        <ThemedSwitch value={enabled} onValueChange={handleToggle} />
+      </View>
+    </ThemedView>
+  );
+}
+
+function RestrictPastDatesForm({ enabled }: { enabled: boolean }) {
+  async function handleToggle(newValue: boolean) {
+    await updateRestrictPastStartDates(newValue);
+  }
+
+  return (
+    <ThemedView type="backgroundElement" style={styles.form}>
+      <View style={styles.vibrationHeader}>
+        <View style={{ flex: 1, gap: Spacing.half }}>
+          <ThemedText type="smallBold">No permitir fechas pasadas</ThemedText>
+          <ThemedText type="small" themeColor="textSecondary">
+            Al crear o editar una regla recurrente, no se podrá elegir un punto de partida
+            anterior a hoy.
           </ThemedText>
         </View>
         <ThemedSwitch value={enabled} onValueChange={handleToggle} />

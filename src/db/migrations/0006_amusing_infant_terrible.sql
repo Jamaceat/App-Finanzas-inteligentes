@@ -1,0 +1,1 @@
+ALTER TABLE `app_settings` ADD `restrict_past_start_dates` integer DEFAULT false NOT NULL;
