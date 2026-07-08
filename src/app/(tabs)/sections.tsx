@@ -1,7 +1,7 @@
 import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
 import { SymbolView, type AndroidSymbol, type SFSymbol } from 'expo-symbols';
 import { useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -71,35 +71,41 @@ export default function SectionsScreen() {
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
-        <ThemedText type="title" style={styles.title}>
-          Secciones
-        </ThemedText>
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
+          <ThemedText type="title" style={styles.title}>
+            Secciones
+          </ThemedText>
 
-        <SectionForm
-          key={editingSection?.id ?? 'new'}
-          editing={editingSection}
-          onDone={() => setEditingId(null)}
-        />
+          <SectionForm
+            key={editingSection?.id ?? 'new'}
+            editing={editingSection}
+            onDone={() => setEditingId(null)}
+          />
 
-        <ThemedView style={styles.list}>
-          {sections.length === 0 && (
-            <ThemedText themeColor="textSecondary">Sin secciones todavía.</ThemedText>
-          )}
-          {sections.map((section) => (
-            <SectionRow
-              key={section.id}
-              section={section}
-              isEditing={section.id === editingId}
-              onEdit={() => setEditingId(section.id === editingId ? null : section.id)}
-              onArchive={() => {
-                if (editingId === section.id) {
-                  setEditingId(null);
-                }
-                archiveSection(section.id);
-              }}
-            />
-          ))}
-        </ThemedView>
+          <ThemedView style={styles.list}>
+            {sections.length === 0 && (
+              <ThemedText themeColor="textSecondary">Sin secciones todavía.</ThemedText>
+            )}
+            {sections.map((section) => (
+              <SectionRow
+                key={section.id}
+                section={section}
+                isEditing={section.id === editingId}
+                onEdit={() => setEditingId(section.id === editingId ? null : section.id)}
+                onArchive={() => {
+                  if (editingId === section.id) {
+                    setEditingId(null);
+                  }
+                  archiveSection(section.id);
+                }}
+              />
+            ))}
+          </ThemedView>
+        </ScrollView>
       </SafeAreaView>
     </ThemedView>
   );
@@ -273,6 +279,12 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     maxWidth: MaxContentWidth,
+  },
+  scrollView: {
+    flex: 1,
+    width: '100%',
+  },
+  scrollContent: {
     paddingHorizontal: Spacing.four,
     paddingBottom: BottomTabInset + Spacing.three,
     gap: Spacing.three,

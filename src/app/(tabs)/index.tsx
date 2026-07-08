@@ -3,7 +3,7 @@ import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
 import { Children, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, View, Modal, type LayoutChangeEvent, type GestureResponderEvent } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
   Extrapolation,
   interpolate,
@@ -267,126 +267,132 @@ export default function HomeScreen() {
   }
 
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea} edges={['top']}>
-        <ThemedText type="title" style={styles.title}>
-          Inicio
-        </ThemedText>
-
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.filterScrollView}
-          contentContainerStyle={styles.filterRow}>
-          <FilterChip
-            label="Todos"
-            selected={selectedSectionId === null}
-            onPress={() => setSelectedSectionId(null)}
-          />
-          {sectionFilters.map((section) => (
-            <FilterChip
-              key={section.id}
-              label={section.name}
-              color={section.color}
-              selected={selectedSectionId === section.id}
-              onPress={() => setSelectedSectionId(section.id)}
-            />
-          ))}
-        </ScrollView>
-
-        <View style={styles.searchButtonContainerCentered}>
-          {isPressing && (
-            <>
-              <Animated.View style={[styles.pressOuterRing, outerRingStyle]} />
-              <Animated.View style={[styles.pressInnerCircle, innerCircleStyle]} />
-            </>
-          )}
-          <Pressable
-            onPressIn={handlePressIn}
-            onPressOut={handlePressOut}
-            style={[
-              styles.searchButton,
-              { backgroundColor: theme.backgroundElement },
-            ]}
-          >
-            <SymbolView
-              name={symbol('magnifyingglass', 'search')}
-              tintColor={theme.text}
-              size={22}
-            />
-          </Pressable>
-        </View>
-
-        <TankCarousel scrollRef={scrollRef}>
-          <Tank
-            label="Libre"
-            amount={freeCashTank.level}
-            capacity={Math.max(freeCashTank.capacity, 1)}
-            color={FREE_TANK_COLOR}
-            tilt={tilt}
-          />
-          {filteredIncomeTanks.map((tank) => (
-            <Tank
-              key={tank.ruleId}
-              label={tank.label}
-              amount={tank.level}
-              capacity={Math.max(tank.capacity, 1)}
-              color={TANK_COLOR}
-              tilt={tilt}
-            />
-          ))}
-        </TankCarousel>
-
-        <View style={styles.pendingSection}>
-          <ThemedText type="smallBold">Gastos pendientes</ThemedText>
-          {pendingExpenses.length === 0 && (
-            <ThemedText themeColor="textSecondary" type="small">
-              No hay gastos concurrentes pendientes.
+    <GestureHandlerRootView style={styles.gestureRoot}>
+      <ThemedView style={styles.container}>
+        <SafeAreaView style={styles.safeArea} edges={['top']}>
+          <ScrollView
+            style={styles.scrollView}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}>
+            <ThemedText type="title" style={styles.title}>
+              Inicio
             </ThemedText>
-          )}
-          {incomeTanks.length === 0 && pendingExpenses.length > 0 && (
-            <ThemedText themeColor="textSecondary" type="small">
-              Creá una regla de ingreso recurrente en Secciones para poder asignarles pagos.
-            </ThemedText>
-          )}
-          <View style={styles.pendingList}>
-            {pendingExpenses.map((expense) => {
-              const currentTankIndex = expenseTankIndices[expense.ruleId] ?? 0;
-              const section = (sections || []).find((s) => s.id === expense.sectionId);
-              return (
-                <PendingExpenseCard
-                  key={expense.ruleId}
-                  expense={expense}
-                  tanks={incomeTanks}
-                  section={section}
-                  tankIndex={currentTankIndex}
-                  onSelectTankIndex={(newIdx) => {
-                    setExpenseTankIndices((prev) => ({ ...prev, [expense.ruleId]: newIdx }));
-                  }}
-                  onPress={() => {
-                    setFocusedExpense(expense);
-                  }}
-                  onDropOnTank={(tank) => confirmAllocate(expense, tank)}
+
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.filterScrollView}
+              contentContainerStyle={styles.filterRow}>
+              <FilterChip
+                label="Todos"
+                selected={selectedSectionId === null}
+                onPress={() => setSelectedSectionId(null)}
+              />
+              {sectionFilters.map((section) => (
+                <FilterChip
+                  key={section.id}
+                  label={section.name}
+                  color={section.color}
+                  selected={selectedSectionId === section.id}
+                  onPress={() => setSelectedSectionId(section.id)}
                 />
-              );
-            })}
-          </View>
-        </View>
-        <TankSearchModal
-          visible={modalVisible}
-          onClose={() => {
-            setModalVisible(false);
-            setSearchQuery('');
-          }}
-          tanks={allTanks}
-          searchQuery={searchQuery}
-          onSearchQueryChange={setSearchQuery}
-          onSelectTank={handleSelectTank}
-        />
-      </SafeAreaView>
+              ))}
+            </ScrollView>
 
-      {/* Focused Expense Detail Modal */}
-      {focusedExpense && (() => {
+            <View style={styles.searchButtonContainerCentered}>
+              {isPressing && (
+                <>
+                  <Animated.View style={[styles.pressOuterRing, outerRingStyle]} />
+                  <Animated.View style={[styles.pressInnerCircle, innerCircleStyle]} />
+                </>
+              )}
+              <Pressable
+                onPressIn={handlePressIn}
+                onPressOut={handlePressOut}
+                style={[
+                  styles.searchButton,
+                  { backgroundColor: theme.backgroundElement },
+                ]}
+              >
+                <SymbolView
+                  name={symbol('magnifyingglass', 'search')}
+                  tintColor={theme.text}
+                  size={22}
+                />
+              </Pressable>
+            </View>
+
+            <TankCarousel scrollRef={scrollRef}>
+              <Tank
+                label="Libre"
+                amount={freeCashTank.level}
+                capacity={Math.max(freeCashTank.capacity, 1)}
+                color={FREE_TANK_COLOR}
+                tilt={tilt}
+              />
+              {filteredIncomeTanks.map((tank) => (
+                <Tank
+                  key={tank.ruleId}
+                  label={tank.label}
+                  amount={tank.level}
+                  capacity={Math.max(tank.capacity, 1)}
+                  color={TANK_COLOR}
+                  tilt={tilt}
+                />
+              ))}
+            </TankCarousel>
+
+            <View style={styles.pendingSection}>
+              <ThemedText type="smallBold">Gastos pendientes</ThemedText>
+              {pendingExpenses.length === 0 && (
+                <ThemedText themeColor="textSecondary" type="small">
+                  No hay gastos concurrentes pendientes.
+                </ThemedText>
+              )}
+              {incomeTanks.length === 0 && pendingExpenses.length > 0 && (
+                <ThemedText themeColor="textSecondary" type="small">
+                  Creá una regla de ingreso recurrente en Secciones para poder asignarles pagos.
+                </ThemedText>
+              )}
+              <View style={styles.pendingList}>
+                {pendingExpenses.map((expense) => {
+                  const currentTankIndex = expenseTankIndices[expense.ruleId] ?? 0;
+                  const section = (sections || []).find((s) => s.id === expense.sectionId);
+                  return (
+                    <PendingExpenseCard
+                      key={expense.ruleId}
+                      expense={expense}
+                      tanks={incomeTanks}
+                      section={section}
+                      tankIndex={currentTankIndex}
+                      onSelectTankIndex={(newIdx) => {
+                        setExpenseTankIndices((prev) => ({ ...prev, [expense.ruleId]: newIdx }));
+                      }}
+                      onPress={() => {
+                        setFocusedExpense(expense);
+                      }}
+                      onDropOnTank={(tank) => confirmAllocate(expense, tank)}
+                    />
+                  );
+                })}
+              </View>
+            </View>
+          </ScrollView>
+          <TankSearchModal
+            visible={modalVisible}
+            onClose={() => {
+              setModalVisible(false);
+              setSearchQuery('');
+            }}
+            tanks={allTanks}
+            searchQuery={searchQuery}
+            onSearchQueryChange={setSearchQuery}
+            onSelectTank={handleSelectTank}
+          />
+        </SafeAreaView>
+
+        {/* Focused Expense Detail Modal */}
+        {focusedExpense && (() => {
         const hasTanks = incomeTanks.length > 0;
         const currentTankIndex = expenseTankIndices[focusedExpense.ruleId] ?? 0;
         const focusedSection = (sections || []).find((s) => s.id === focusedExpense.sectionId);
@@ -564,7 +570,8 @@ export default function HomeScreen() {
           </Modal>
         );
       })()}
-    </ThemedView>
+      </ThemedView>
+    </GestureHandlerRootView>
   );
 }
 
@@ -811,6 +818,8 @@ function PendingExpenseCard({
   }
 
   const pan = Gesture.Pan()
+    .activeOffsetX([-10, 10])
+    .failOffsetY([-10, 10])
     .onChange((event) => {
       translateX.value += event.changeX;
     })
@@ -908,6 +917,9 @@ function PendingExpenseCard({
 }
 
 const styles = StyleSheet.create({
+  gestureRoot: {
+    flex: 1,
+  },
   container: {
     flex: 1,
     alignItems: 'center',
@@ -916,6 +928,12 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     maxWidth: MaxContentWidth,
+  },
+  scrollView: {
+    flex: 1,
+    width: '100%',
+  },
+  scrollContent: {
     paddingBottom: BottomTabInset + Spacing.three,
     gap: Spacing.four,
   },

@@ -1,6 +1,6 @@
 import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
   useAnimatedStyle,
@@ -41,16 +41,22 @@ export default function SettingsScreen() {
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
-        <ThemedText type="title" style={styles.title}>
-          Ajustes
-        </ThemedText>
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
+          <ThemedText type="title" style={styles.title}>
+            Ajustes
+          </ThemedText>
 
-        {row && (
-          <View style={styles.formsContainer}>
-            <RenewalForm value={row.tankMaxRenewalValue} unit={row.tankMaxRenewalUnit} />
-            <VibrationForm enabled={row.vibrationEnabled} />
-          </View>
-        )}
+          {row && (
+            <View style={styles.formsContainer}>
+              <RenewalForm value={row.tankMaxRenewalValue} unit={row.tankMaxRenewalUnit} />
+              <VibrationForm enabled={row.vibrationEnabled} />
+            </View>
+          )}
+        </ScrollView>
       </SafeAreaView>
     </ThemedView>
   );
@@ -192,6 +198,12 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     maxWidth: MaxContentWidth,
+  },
+  scrollView: {
+    flex: 1,
+    width: '100%',
+  },
+  scrollContent: {
     paddingHorizontal: Spacing.four,
     paddingBottom: BottomTabInset + Spacing.three,
     gap: Spacing.three,

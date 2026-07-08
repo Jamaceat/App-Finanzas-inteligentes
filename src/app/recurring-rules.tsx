@@ -1,7 +1,7 @@
 import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
 import { useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -83,40 +83,46 @@ export default function RecurringRulesScreen() {
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
-        <ThemedText type="title" style={styles.title}>
-          Reglas recurrentes
-        </ThemedText>
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
+          <ThemedText type="title" style={styles.title}>
+            Reglas recurrentes
+          </ThemedText>
 
-        <RuleForm
-          key={editingRule?.id ?? 'new'}
-          editing={editingRule}
-          sections={sections}
-          initialKind={params.kind}
-          initialVariable={params.variable === '1'}
-          onDone={() => setEditingId(null)}
-        />
+          <RuleForm
+            key={editingRule?.id ?? 'new'}
+            editing={editingRule}
+            sections={sections}
+            initialKind={params.kind}
+            initialVariable={params.variable === '1'}
+            onDone={() => setEditingId(null)}
+          />
 
-        <ThemedView style={styles.list}>
-          {rules.length === 0 && (
-            <ThemedText themeColor="textSecondary">Sin reglas recurrentes todavía.</ThemedText>
-          )}
-          {rules.map((rule) => (
-            <RuleRow
-              key={rule.id}
-              rule={rule}
-              sectionName={sections.find((section) => section.id === rule.sectionId)?.name}
-              isEditing={rule.id === editingId}
-              onEdit={() => setEditingId(rule.id === editingId ? null : rule.id)}
-              onArchive={() => {
-                if (editingId === rule.id) {
-                  setEditingId(null);
-                }
-                archiveRecurringRule(rule.id);
-                cancelRuleReminder(rule.id);
-              }}
-            />
-          ))}
-        </ThemedView>
+          <ThemedView style={styles.list}>
+            {rules.length === 0 && (
+              <ThemedText themeColor="textSecondary">Sin reglas recurrentes todavía.</ThemedText>
+            )}
+            {rules.map((rule) => (
+              <RuleRow
+                key={rule.id}
+                rule={rule}
+                sectionName={sections.find((section) => section.id === rule.sectionId)?.name}
+                isEditing={rule.id === editingId}
+                onEdit={() => setEditingId(rule.id === editingId ? null : rule.id)}
+                onArchive={() => {
+                  if (editingId === rule.id) {
+                    setEditingId(null);
+                  }
+                  archiveRecurringRule(rule.id);
+                  cancelRuleReminder(rule.id);
+                }}
+              />
+            ))}
+          </ThemedView>
+        </ScrollView>
       </SafeAreaView>
     </ThemedView>
   );
@@ -518,6 +524,12 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     maxWidth: MaxContentWidth,
+  },
+  scrollView: {
+    flex: 1,
+    width: '100%',
+  },
+  scrollContent: {
     paddingHorizontal: Spacing.four,
     paddingBottom: BottomTabInset + Spacing.three,
     gap: Spacing.three,

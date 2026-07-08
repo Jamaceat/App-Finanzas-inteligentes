@@ -1,7 +1,7 @@
 import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
 import { useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -45,47 +45,53 @@ export default function TransactionsScreen() {
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
-        <ThemedText type="title" style={styles.title}>
-          Transacciones
-        </ThemedText>
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
+          <ThemedText type="title" style={styles.title}>
+            Transacciones
+          </ThemedText>
 
-        <QuickAddForm sections={sections} initialKind={initialKind} />
+          <QuickAddForm sections={sections} initialKind={initialKind} />
 
-        {sections.length > 0 && (
-          <SectionFilterRow
-            sections={sections}
-            selectedId={sectionFilter}
-            onSelect={setSectionFilter}
-          />
-        )}
-
-        <ThemedView style={styles.list}>
-          {transactions.length === 0 && (
-            <ThemedText themeColor="textSecondary">Sin transacciones todavía.</ThemedText>
+          {sections.length > 0 && (
+            <SectionFilterRow
+              sections={sections}
+              selectedId={sectionFilter}
+              onSelect={setSectionFilter}
+            />
           )}
-          {transactions.map((transaction) => {
-            const section = sectionById.get(transaction.sectionId);
-            const isExpense = transaction.kind === 'expense';
-            return (
-              <ThemedView key={transaction.id} type="backgroundElement" style={styles.row}>
-                <View style={styles.rowMain}>
-                  <ThemedText type="smallBold">{section?.name ?? 'Sección'}</ThemedText>
-                  {transaction.description ? (
-                    <ThemedText type="small" themeColor="textSecondary">
-                      {transaction.description}
-                    </ThemedText>
-                  ) : null}
-                </View>
-                <ThemedText
-                  type="smallBold"
-                  style={{ color: isExpense ? '#E5484D' : '#30A46C' }}>
-                  {isExpense ? '-' : '+'}
-                  {formatCurrency(transaction.amount)}
-                </ThemedText>
-              </ThemedView>
-            );
-          })}
-        </ThemedView>
+
+          <ThemedView style={styles.list}>
+            {transactions.length === 0 && (
+              <ThemedText themeColor="textSecondary">Sin transacciones todavía.</ThemedText>
+            )}
+            {transactions.map((transaction) => {
+              const section = sectionById.get(transaction.sectionId);
+              const isExpense = transaction.kind === 'expense';
+              return (
+                <ThemedView key={transaction.id} type="backgroundElement" style={styles.row}>
+                  <View style={styles.rowMain}>
+                    <ThemedText type="smallBold">{section?.name ?? 'Sección'}</ThemedText>
+                    {transaction.description ? (
+                      <ThemedText type="small" themeColor="textSecondary">
+                        {transaction.description}
+                      </ThemedText>
+                    ) : null}
+                  </View>
+                  <ThemedText
+                    type="smallBold"
+                    style={{ color: isExpense ? '#E5484D' : '#30A46C' }}>
+                    {isExpense ? '-' : '+'}
+                    {formatCurrency(transaction.amount)}
+                  </ThemedText>
+                </ThemedView>
+              );
+            })}
+          </ThemedView>
+        </ScrollView>
       </SafeAreaView>
     </ThemedView>
   );
@@ -247,6 +253,12 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     maxWidth: MaxContentWidth,
+  },
+  scrollView: {
+    flex: 1,
+    width: '100%',
+  },
+  scrollContent: {
     paddingHorizontal: Spacing.four,
     paddingBottom: BottomTabInset + Spacing.three,
     gap: Spacing.three,

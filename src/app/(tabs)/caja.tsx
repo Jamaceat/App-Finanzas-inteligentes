@@ -79,11 +79,6 @@ export default function CajaScreen() {
             icon={symbol('shippingbox.fill', 'inventory_2')}
             onPress={() => router.push('/asignar-gastos')}
           />
-          <SecondaryButton
-            label="Ajustes"
-            icon={symbol('gearshape.fill', 'settings')}
-            onPress={() => router.push('/settings')}
-          />
         </View>
       </SafeAreaView>
     </ThemedView>

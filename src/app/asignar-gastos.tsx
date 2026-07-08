@@ -1,11 +1,14 @@
 import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View, Pressable, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { useNavigation } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { FloatingExpensePoint, type MiniTankTarget, POINT_WIDTH, POINT_HEIGHT } from '@/components/floating-expense-point';
+import { PocketWidget } from '@/components/pocket-widget';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import { TANK_COLOR } from '@/constants/constants';
 import { listActiveRecurringRules } from '@/db/queries/recurring-rules';
@@ -13,8 +16,10 @@ import { listActiveSections } from '@/db/queries/sections';
 import {
   allocateExpenseToIncomeTank,
   assignTransactionToIncomeTank,
+  listAssignedExpenseTransactions,
   listTransactions,
   listUnassignedExpenseTransactions,
+  unassignTransactionFromIncomeTank,
 } from '@/db/queries/transactions';
 import { computeIncomeTanks, computePendingExpenses, type PendingExpense } from '@/db/queries/tanks';
 import { watchAppSettingsRow } from '@/db/queries/settings';
@@ -50,11 +55,21 @@ export default function AsignarGastosScreen() {
   const { data: rules } = useLiveQuery(listActiveRecurringRules());
   const { data: transactions } = useLiveQuery(listTransactions());
   const { data: unassignedTransactions } = useLiveQuery(listUnassignedExpenseTransactions());
+  const { data: assignedTransactions } = useLiveQuery(listAssignedExpenseTransactions());
   const { data: sections } = useLiveQuery(listActiveSections());
   const { data: settingsRows } = useLiveQuery(watchAppSettingsRow());
   const { width, height } = useWindowDimensions();
 
   const vibrationEnabled = settingsRows?.[0]?.vibrationEnabled ?? true;
+
+  const navigation = useNavigation();
+  const [isWidgetCollapsed, setIsWidgetCollapsed] = useState(true);
+
+  useEffect(() => {
+    navigation.setOptions({
+      gestureEnabled: isWidgetCollapsed,
+    });
+  }, [navigation, isWidgetCollapsed]);
 
   const [focusedPointKey, setFocusedPointKey] = useState<string | null>(null);
   const [customPositions, setCustomPositions] = useState<Record<string, { x: number; y: number }>>({});
@@ -65,6 +80,20 @@ export default function AsignarGastosScreen() {
   const tanks: MiniTankTarget[] = useMemo(
     () => incomeTanks.map((tank) => ({ ruleId: tank.ruleId, label: tank.label, color: TANK_COLOR })),
     [incomeTanks],
+  );
+
+  const pocketExpenses = useMemo(
+    () =>
+      (assignedTransactions || [])
+        .filter((transaction) => transaction.allocatedIncomeRuleId !== null)
+        .map((transaction) => ({
+          id: transaction.id,
+          label: transaction.description || 'Gasto',
+          amount: transaction.amount,
+          occurredAt: transaction.occurredAt,
+          incomeRuleId: transaction.allocatedIncomeRuleId as number,
+        })),
+    [assignedTransactions],
   );
 
   async function handleAllocateRule(expense: PendingExpense, incomeRuleId: number) {
@@ -234,6 +263,14 @@ export default function AsignarGastosScreen() {
           );
         })}
       </View>
+
+      <PocketWidget
+        tanks={tanks}
+        expenses={pocketExpenses}
+        onUnassign={(expenseId) => unassignTransactionFromIncomeTank(expenseId)}
+        vibrationEnabled={vibrationEnabled}
+        onCollapsedChange={setIsWidgetCollapsed}
+      />
     </ThemedView>
   );
 }
