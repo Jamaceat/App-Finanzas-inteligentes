@@ -1,0 +1,1 @@
+ALTER TABLE `app_settings` ADD `transactions_page_size` integer DEFAULT 20 NOT NULL;

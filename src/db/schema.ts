@@ -86,6 +86,7 @@ export const appSettings = sqliteTable('app_settings', {
   restrictPastStartDates: integer('restrict_past_start_dates', { mode: 'boolean' })
     .notNull()
     .default(false),
+  transactionsPageSize: integer('transactions_page_size').notNull().default(20),
   updatedAt: integer('updated_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),

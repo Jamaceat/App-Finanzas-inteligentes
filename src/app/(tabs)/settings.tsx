@@ -20,6 +20,7 @@ import {
   updateVibrationEnabled,
   updateCalendarSimulationOccurrences,
   updateRestrictPastStartDates,
+  updateTransactionsPageSize,
   type TankMaxRenewalUnit,
 } from '@/db/queries/settings';
 
@@ -56,6 +57,7 @@ export default function SettingsScreen() {
             <View style={styles.formsContainer}>
               <RenewalForm value={row.tankMaxRenewalValue} unit={row.tankMaxRenewalUnit} />
               <SimulationForm value={row.calendarSimulationOccurrences} />
+              <TransactionsPageSizeForm value={row.transactionsPageSize} />
               <VibrationForm enabled={row.vibrationEnabled} />
               <RestrictPastDatesForm enabled={row.restrictPastStartDates} />
             </View>
@@ -136,6 +138,42 @@ function SimulationForm({ value }: { value: number }) {
           onChangeText={(t) => setText(t.replace(/\D/g, ''))}
           keyboardType="number-pad"
           placeholder="24"
+          placeholderTextColor={theme.textSecondary}
+          style={[styles.input, { color: theme.text, backgroundColor: theme.background }]}
+        />
+      </View>
+
+      <Pressable onPress={handleSave} style={({ pressed }) => pressed && styles.pressed}>
+        <ThemedView type="backgroundSelected" style={styles.submitButton}>
+          <ThemedText type="smallBold">Guardar</ThemedText>
+        </ThemedView>
+      </Pressable>
+    </ThemedView>
+  );
+}
+
+function TransactionsPageSizeForm({ value }: { value: number }) {
+  const theme = useTheme();
+  const [text, setText] = useState(String(value));
+
+  async function handleSave() {
+    const parsed = Math.max(1, Number(text) || 1);
+    await updateTransactionsPageSize(parsed);
+  }
+
+  return (
+    <ThemedView type="backgroundElement" style={styles.form}>
+      <ThemedText type="smallBold">Máximo de elementos por página</ThemedText>
+      <ThemedText type="small" themeColor="textSecondary">
+        Define cuántos movimientos se muestran por página en la pantalla de Movimientos.
+      </ThemedText>
+
+      <View style={styles.row}>
+        <TextInput
+          value={text}
+          onChangeText={(t) => setText(t.replace(/\D/g, ''))}
+          keyboardType="number-pad"
+          placeholder="20"
           placeholderTextColor={theme.textSecondary}
           style={[styles.input, { color: theme.text, backgroundColor: theme.background }]}
         />

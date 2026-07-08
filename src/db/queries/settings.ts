@@ -12,6 +12,7 @@ export type AppSettings = {
   vibrationEnabled: boolean;
   calendarSimulationOccurrences: number;
   restrictPastStartDates: boolean;
+  transactionsPageSize: number;
 };
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -20,6 +21,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   vibrationEnabled: true,
   calendarSimulationOccurrences: DEFAULT_SIMULATION_OCCURRENCES,
   restrictPastStartDates: false,
+  transactionsPageSize: 20,
 };
 
 export function watchAppSettingsRow() {
@@ -104,6 +106,24 @@ export async function updateRestrictPastStartDates(enabled: boolean): Promise<Ap
   const [updated] = await db
     .update(appSettings)
     .set({ restrictPastStartDates: enabled, updatedAt: new Date() })
+    .where(eq(appSettings.id, row.id))
+    .returning();
+  return updated;
+}
+
+export async function updateTransactionsPageSize(pageSize: number): Promise<AppSettings> {
+  const [row] = await watchAppSettingsRow();
+  if (!row) {
+    const [created] = await db
+      .insert(appSettings)
+      .values({ ...DEFAULT_SETTINGS, transactionsPageSize: pageSize })
+      .returning();
+    return created;
+  }
+
+  const [updated] = await db
+    .update(appSettings)
+    .set({ transactionsPageSize: pageSize, updatedAt: new Date() })
     .where(eq(appSettings.id, row.id))
     .returning();
   return updated;

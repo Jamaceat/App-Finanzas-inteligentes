@@ -3,13 +3,30 @@ import { useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { SymbolView, type AndroidSymbol, type SFSymbol } from 'expo-symbols';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { TankSearchModal, type SearchTankItem } from '@/components/tank-search-modal';
+import { PaginationControls } from '@/components/pagination-controls';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { FREE_TANK_COLOR, TANK_COLOR } from '@/constants/constants';
 import { useTheme } from '@/hooks/use-theme';
-import { createTransaction, listTransactions, type TransactionKind } from '@/db/queries/transactions';
+import { usePagination } from '@/hooks/use-pagination';
+import {
+  countTransactions,
+  createTransaction,
+  listTransactions,
+  type TransactionKind,
+} from '@/db/queries/transactions';
 import { getOrCreateDefaultSection, listActiveSections } from '@/db/queries/sections';
+import { listActiveRecurringRules } from '@/db/queries/recurring-rules';
+import { computeFreeCashTank, computeIncomeTanks, addInterval } from '@/db/queries/tanks';
+import { watchAppSettingsRow } from '@/db/queries/settings';
+
+function symbol(ios: SFSymbol, android: AndroidSymbol) {
+  return { ios, android, web: android };
+}
 
 const currencyFormatter = new Intl.NumberFormat('es-AR', {
   style: 'currency',
@@ -27,19 +44,79 @@ function formatCurrency(amount: number): string {
   return currencyFormatter.format(amount);
 }
 
+const TRANSACTIONS_PAGE_SIZE = 20;
+
 export default function TransactionsScreen() {
   const { kind: initialKind } = useLocalSearchParams<{ kind?: TransactionKind }>();
   const [sectionFilter, setSectionFilter] = useState<number | undefined>(undefined);
 
   const { data: sections } = useLiveQuery(listActiveSections());
-  const { data: transactions } = useLiveQuery(
-    listTransactions({ sectionId: sectionFilter }),
+  const { data: settingsRows } = useLiveQuery(watchAppSettingsRow());
+  const settings = settingsRows[0] ?? { tankMaxRenewalValue: 30, tankMaxRenewalUnit: 'days' as const };
+  const pageSize = settingsRows[0]?.transactionsPageSize ?? TRANSACTIONS_PAGE_SIZE;
+  const { data: transactionCountRows } = useLiveQuery(
+    countTransactions({ sectionId: sectionFilter }),
     [sectionFilter],
   );
+  const pagination = usePagination({
+    pageSize,
+    totalCount: transactionCountRows[0]?.count ?? 0,
+    resetKey: `${sectionFilter ?? 'all'}:${pageSize}`,
+  });
+  const { data: transactions } = useLiveQuery(
+    listTransactions({
+      sectionId: sectionFilter,
+      limit: pagination.pageSize,
+      offset: pagination.offset,
+    }),
+    [sectionFilter, pagination.offset, pagination.pageSize],
+  );
+  const { data: rules } = useLiveQuery(listActiveRecurringRules());
+  const { data: allTransactions } = useLiveQuery(listTransactions());
 
   const sectionById = useMemo(
     () => new Map(sections.map((section) => [section.id, section])),
     [sections],
+  );
+
+  const incomeTanks = useMemo(
+    () => computeIncomeTanks(rules, allTransactions),
+    [rules, allTransactions],
+  );
+  const freeCashTank = useMemo(() => {
+    const windowStart = addInterval(
+      new Date(),
+      -settings.tankMaxRenewalValue,
+      settings.tankMaxRenewalUnit,
+    );
+    return computeFreeCashTank(rules, allTransactions, windowStart);
+  }, [rules, allTransactions, settings.tankMaxRenewalValue, settings.tankMaxRenewalUnit]);
+
+  const tanks: SearchTankItem[] = useMemo(() => {
+    const list: SearchTankItem[] = [
+      {
+        ruleId: undefined,
+        label: 'Libre',
+        amount: freeCashTank.level,
+        capacity: Math.max(freeCashTank.capacity, 1),
+        color: FREE_TANK_COLOR,
+      },
+    ];
+    incomeTanks.forEach((tank) => {
+      list.push({
+        ruleId: tank.ruleId,
+        label: tank.label,
+        amount: tank.level,
+        capacity: Math.max(tank.capacity, 1),
+        color: TANK_COLOR,
+      });
+    });
+    return list;
+  }, [freeCashTank, incomeTanks]);
+
+  const tankLabelByRuleId = useMemo(
+    () => new Map(incomeTanks.map((tank) => [tank.ruleId, tank.label])),
+    [incomeTanks],
   );
 
   return (
@@ -54,7 +131,7 @@ export default function TransactionsScreen() {
             Transacciones
           </ThemedText>
 
-          <QuickAddForm sections={sections} initialKind={initialKind} />
+          <QuickAddForm sections={sections} tanks={tanks} initialKind={initialKind} />
 
           {sections.length > 0 && (
             <SectionFilterRow
@@ -64,6 +141,16 @@ export default function TransactionsScreen() {
             />
           )}
 
+          <PaginationControls
+            page={pagination.page}
+            pageCount={pagination.pageCount}
+            hasPreviousPage={pagination.hasPreviousPage}
+            hasNextPage={pagination.hasNextPage}
+            onPrevious={pagination.goToPreviousPage}
+            onNext={pagination.goToNextPage}
+            onGoToPage={pagination.goToPage}
+          />
+
           <ThemedView style={styles.list}>
             {transactions.length === 0 && (
               <ThemedText themeColor="textSecondary">Sin transacciones todavía.</ThemedText>
@@ -71,6 +158,10 @@ export default function TransactionsScreen() {
             {transactions.map((transaction) => {
               const section = sectionById.get(transaction.sectionId);
               const isExpense = transaction.kind === 'expense';
+              const tankRuleId = isExpense
+                ? transaction.allocatedIncomeRuleId
+                : transaction.recurringRuleId;
+              const tankLabel = tankRuleId !== null ? tankLabelByRuleId.get(tankRuleId) : undefined;
               return (
                 <ThemedView key={transaction.id} type="backgroundElement" style={styles.row}>
                   <View style={styles.rowMain}>
@@ -80,6 +171,10 @@ export default function TransactionsScreen() {
                         {transaction.description}
                       </ThemedText>
                     ) : null}
+                    <ThemedText type="small" themeColor="textSecondary">
+                      {isExpense ? 'Sale de: ' : 'Se agrega a: '}
+                      {tankLabel ?? 'Libre'}
+                    </ThemedText>
                   </View>
                   <ThemedText
                     type="smallBold"
@@ -91,6 +186,16 @@ export default function TransactionsScreen() {
               );
             })}
           </ThemedView>
+
+          <PaginationControls
+            page={pagination.page}
+            pageCount={pagination.pageCount}
+            hasPreviousPage={pagination.hasPreviousPage}
+            hasNextPage={pagination.hasNextPage}
+            onPrevious={pagination.goToPreviousPage}
+            onNext={pagination.goToNextPage}
+            onGoToPage={pagination.goToPage}
+          />
         </ScrollView>
       </SafeAreaView>
     </ThemedView>
@@ -143,9 +248,11 @@ function FilterChip({
 
 function QuickAddForm({
   sections,
+  tanks,
   initialKind,
 }: {
   sections: { id: number; name: string }[];
+  tanks: SearchTankItem[];
   initialKind?: TransactionKind;
 }) {
   const theme = useTheme();
@@ -153,6 +260,9 @@ function QuickAddForm({
   const [amountDigits, setAmountDigits] = useState('');
   const [description, setDescription] = useState('');
   const [sectionId, setSectionId] = useState<number | undefined>(undefined);
+  const [selectedTank, setSelectedTank] = useState<SearchTankItem | null>(null);
+  const [tankModalVisible, setTankModalVisible] = useState(false);
+  const [tankSearchQuery, setTankSearchQuery] = useState('');
 
   const parsedAmount = Number(amountDigits || '0') / 100;
   const formattedAmount = formatCurrencyInput(amountDigits);
@@ -175,6 +285,7 @@ function QuickAddForm({
       kind,
       description: description.trim() || undefined,
       occurredAt: new Date(),
+      allocatedIncomeRuleId: kind === 'expense' ? selectedTank?.ruleId : undefined,
     });
 
     setAmountDigits('');
@@ -235,11 +346,47 @@ function QuickAddForm({
         </View>
       )}
 
+      {kind === 'expense' && (
+        <Pressable
+          onPress={() => setTankModalVisible(true)}
+          style={({ pressed }) => pressed && styles.pressed}>
+          <ThemedView type="background" style={styles.tankPicker}>
+            <View
+              style={[
+                styles.tankPickerDot,
+                { backgroundColor: selectedTank?.color ?? FREE_TANK_COLOR },
+              ]}
+            />
+            <ThemedText type="small" style={styles.tankPickerLabel}>
+              {selectedTank ? `Sale de: ${selectedTank.label}` : 'Sale de: Libre'}
+            </ThemedText>
+            <SymbolView
+              name={symbol('chevron.right', 'chevron_right')}
+              tintColor={theme.textSecondary}
+              size={14}
+            />
+          </ThemedView>
+        </Pressable>
+      )}
+
       <Pressable onPress={handleSubmit} style={({ pressed }) => pressed && styles.pressed}>
         <ThemedView type="backgroundSelected" style={styles.submitButton}>
           <ThemedText type="smallBold">Agregar</ThemedText>
         </ThemedView>
       </Pressable>
+
+      <TankSearchModal
+        visible={tankModalVisible}
+        onClose={() => setTankModalVisible(false)}
+        tanks={tanks}
+        searchQuery={tankSearchQuery}
+        onSearchQueryChange={setTankSearchQuery}
+        onSelectTank={(tank) => {
+          setSelectedTank(tank.ruleId === undefined ? null : tank);
+          setTankModalVisible(false);
+          setTankSearchQuery('');
+        }}
+      />
     </ThemedView>
   );
 }
@@ -299,6 +446,22 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.one,
     paddingHorizontal: Spacing.three,
     borderRadius: Spacing.three,
+  },
+  tankPicker: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    paddingVertical: Spacing.two,
+    paddingHorizontal: Spacing.three,
+    borderRadius: Spacing.three,
+  },
+  tankPickerDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  tankPickerLabel: {
+    flex: 1,
   },
   submitButton: {
     alignItems: 'center',

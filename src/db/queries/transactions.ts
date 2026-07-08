@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, isNotNull, isNull, lte } from 'drizzle-orm';
+import { and, count, desc, eq, gte, isNotNull, isNull, lte } from 'drizzle-orm';
 
 import { db } from '@/db/client';
 import { transactions } from '@/db/schema';
@@ -11,14 +11,35 @@ import { advanceDate } from '@/db/queries/tanks';
 
 export type TransactionKind = (typeof transactions.$inferSelect)['kind'];
 
-export function listTransactions(filter?: { sectionId?: number; from?: Date; to?: Date }) {
-  const conditions = [
+export type TransactionFilter = { sectionId?: number; from?: Date; to?: Date };
+
+function transactionFilterConditions(filter?: TransactionFilter) {
+  return [
     filter?.sectionId !== undefined ? eq(transactions.sectionId, filter.sectionId) : undefined,
     filter?.from ? gte(transactions.occurredAt, filter.from) : undefined,
     filter?.to ? lte(transactions.occurredAt, filter.to) : undefined,
   ].filter((condition) => condition !== undefined);
+}
+
+export function listTransactions(
+  filter?: TransactionFilter & { limit?: number; offset?: number },
+) {
+  const conditions = transactionFilterConditions(filter);
 
   const query = db.select().from(transactions).orderBy(desc(transactions.occurredAt));
+  const filtered = conditions.length > 0 ? query.where(and(...conditions)) : query;
+
+  if (filter?.limit !== undefined) {
+    return filtered.limit(filter.limit).offset(filter.offset ?? 0);
+  }
+
+  return filtered;
+}
+
+export function countTransactions(filter?: TransactionFilter) {
+  const conditions = transactionFilterConditions(filter);
+
+  const query = db.select({ count: count() }).from(transactions);
 
   return conditions.length > 0 ? query.where(and(...conditions)) : query;
 }

@@ -8,6 +8,7 @@ import m0003 from './0003_greedy_inhumans.sql';
 import m0004 from './0004_free_wallflower.sql';
 import m0005 from './0005_organic_luminals.sql';
 import m0006 from './0006_amusing_infant_terrible.sql';
+import m0007 from './0007_wonderful_franklin_storm.sql';
 
   export default {
     journal,
@@ -18,7 +19,8 @@ m0002,
 m0003,
 m0004,
 m0005,
-m0006
+m0006,
+m0007
     }
   }
   
