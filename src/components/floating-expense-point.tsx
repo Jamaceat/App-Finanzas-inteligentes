@@ -13,6 +13,8 @@ import Animated, {
   withSpring,
   withTiming,
   SharedValue,
+  interpolate,
+  withDelay,
 } from 'react-native-reanimated';
 import { SymbolView, type AndroidSymbol, type SFSymbol } from 'expo-symbols';
 
@@ -94,23 +96,47 @@ export function FloatingExpensePoint({
 
   const [assigningTankId, setAssigningTankId] = useState<number | null>(null);
 
-  const translateX = useSharedValue(originX - initialX);
-  const translateY = useSharedValue(originY - initialY);
+  const translateX = useSharedValue(screenWidth - 65 - initialX);
+  const translateY = useSharedValue(screenHeight - 65 - initialY);
   const wanderX = useSharedValue(0);
   const wanderY = useSharedValue(0);
   const isDragging = useSharedValue(false);
   const isFreeDragging = useSharedValue(false);
   const hoveredTankId = useSharedValue<number | null>(null);
-  const tankRects = useSharedValue<Record<number, Rect>>({});
-  const pillScale = useSharedValue(1);
+  const pillScale = useSharedValue(0);
+  const detailsVisible = useSharedValue(0);
+
+  // Sync detailsVisible with isFocused state
+  useEffect(() => {
+    if (isFocused) {
+      detailsVisible.value = withTiming(1, { duration: 250 });
+    } else {
+      detailsVisible.value = withTiming(0, { duration: 200 });
+    }
+  }, [isFocused]);
+
+  const isMountedRef = useRef(false);
 
   // Sync positions when props change from non-drag sources (e.g. screen resize or filter change)
   useEffect(() => {
-    if (!isDragging.value && !isFreeDragging.value) {
-      translateX.value = originX - initialX;
-      translateY.value = originY - initialY;
+    if (isMountedRef.current) {
+      if (!isDragging.value && !isFreeDragging.value) {
+        translateX.value = originX - initialX;
+        translateY.value = originY - initialY;
+      }
+    } else {
+      isMountedRef.current = true;
+      // Stagger fly-out delay so bubbles pop out sequentially after modal/screen load finishes
+      const baseDelay = 200;
+      const charCode = label.charCodeAt(0) || 0;
+      const stagger = (charCode % 4) * 80;
+      const delay = baseDelay + stagger;
+
+      pillScale.value = withDelay(delay, withSpring(1, { damping: 18, stiffness: 85 }));
+      translateX.value = withDelay(delay, withSpring(originX - initialX, { damping: 20, stiffness: 75 }));
+      translateY.value = withDelay(delay, withSpring(originY - initialY, { damping: 20, stiffness: 75 }));
     }
-  }, [originX, originY, initialX, initialY, translateX, translateY, isDragging, isFreeDragging]);
+  }, [originX, originY, initialX, initialY, translateX, translateY, isDragging, isFreeDragging, pillScale, label]);
 
   const startWander = () => {
     'worklet';
@@ -166,10 +192,6 @@ export function FloatingExpensePoint({
     }
   }, [isFocused, originX, originY, initialX, initialY, centerX, centerY, translateX, translateY, isDragging, assigningTankId]);
 
-  function registerTankRect(ruleId: number, rect: Rect) {
-    tankRects.value = { ...tankRects.value, [ruleId]: rect };
-  }
-
   function triggerHoverVibration() {
     if (vibrationEnabled) {
       Vibration.vibrate(30);
@@ -185,14 +207,30 @@ export function FloatingExpensePoint({
 
     setAssigningTankId(target);
 
-    const rect = tankRects.value[target];
-    if (rect) {
-      const targetCX = rect.x + rect.width / 2;
-      const targetCY = rect.y + rect.height / 2;
-      translateX.value = withTiming(targetCX - initialX, { duration: 300, easing: Easing.out(Easing.quad) });
-      translateY.value = withTiming(targetCY - initialY, { duration: 300, easing: Easing.out(Easing.quad) });
+    const index = tanks.findIndex((t) => t.ruleId === target);
+    if (index !== -1) {
+      const angle = (index / tanks.length) * Math.PI * 2 - Math.PI / 2;
+      const currentDetailsVisible = detailsVisible.value;
+      const baseRadius = 110;
+      const expandedRadius = 150;
+      const radius = baseRadius + (expandedRadius - baseRadius) * currentDetailsVisible;
+      
+      const cosA = Math.cos(angle);
+      const sinA = Math.sin(angle);
+      let xOffset = 0;
+      let yOffset = 0;
+      if (sinA > 0.1) {
+        xOffset = (cosA > 0 ? 35 : -35) * currentDetailsVisible;
+        yOffset = -20 * currentDetailsVisible;
+      }
+      
+      const targetCX = centerX + cosA * radius + xOffset;
+      const targetCY = centerY + sinA * radius + yOffset;
+
+      translateX.value = withSpring(targetCX - initialX, { damping: 20, stiffness: 90 });
+      translateY.value = withSpring(targetCY - initialY, { damping: 20, stiffness: 90 });
     }
-    pillScale.value = withTiming(0, { duration: 300, easing: Easing.out(Easing.quad) });
+    pillScale.value = withSpring(0, { damping: 18, stiffness: 100 });
 
     setTimeout(() => {
       onAssign(target);
@@ -212,6 +250,7 @@ export function FloatingExpensePoint({
 
       if (isFocused) {
         isDragging.value = true;
+        detailsVisible.value = withTiming(0, { duration: 150 });
         const clampedX = Math.max(POINT_WIDTH / 2, Math.min(screenWidth - POINT_WIDTH / 2, event.absoluteX));
         const clampedY = Math.max(POINT_HEIGHT / 2, Math.min(screenHeight - POINT_HEIGHT / 2, event.absoluteY));
         translateX.value = withSpring(clampedX - initialX, { damping: 20, stiffness: 200 });
@@ -224,26 +263,62 @@ export function FloatingExpensePoint({
       if (isFocused) {
         const clampedX = Math.max(POINT_WIDTH / 2, Math.min(screenWidth - POINT_WIDTH / 2, event.absoluteX));
         const clampedY = Math.max(POINT_HEIGHT / 2, Math.min(screenHeight - POINT_HEIGHT / 2, event.absoluteY));
-        translateX.value = clampedX - initialX;
-        translateY.value = clampedY - initialY;
-        
-        let foundTarget: number | null = null;
-        for (const key in tankRects.value) {
-          const rect = tankRects.value[Number(key)];
-          if (
-            event.absoluteX >= rect.x &&
-            event.absoluteX <= rect.x + rect.width &&
-            event.absoluteY >= rect.y &&
-            event.absoluteY <= rect.y + rect.height
-          ) {
-            foundTarget = Number(key);
-            break;
+
+        // Magnetic field: the pill position blends continuously between the
+        // finger and the nearest tank center, so attraction ramps up smoothly
+        // on approach and eases off (with resistance) when pulling away.
+        const ATTRACT_RADIUS = 120; // pull starts being felt
+        const CAPTURE_RADIUS = 60; // close enough to count as hovered/droppable
+        const RELEASE_RADIUS = 90; // must move this far to break the hover (hysteresis)
+
+        let nearestId: number | null = null;
+        let nearestDist = Infinity;
+        let nearestCX = 0;
+        let nearestCY = 0;
+        let hoveredDist = Infinity;
+
+        tanks.forEach((tank, index) => {
+          const angle = (index / tanks.length) * Math.PI * 2 - Math.PI / 2;
+          // During dragging, the circles are contracted (detailsVisible.value is 0)
+          const tankCX = centerX + Math.cos(angle) * 110;
+          const tankCY = centerY + Math.sin(angle) * 110;
+
+          const dx = event.absoluteX - tankCX;
+          const dy = event.absoluteY - tankCY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+
+          if (dist < nearestDist) {
+            nearestDist = dist;
+            nearestId = tank.ruleId;
+            nearestCX = tankCX;
+            nearestCY = tankCY;
           }
+          if (tank.ruleId === hoveredTankId.value) {
+            hoveredDist = dist;
+          }
+        });
+
+        let targetX = clampedX;
+        let targetY = clampedY;
+        if (nearestId !== null && nearestDist < ATTRACT_RADIUS) {
+          const t = 1 - nearestDist / ATTRACT_RADIUS;
+          const pull = t * t * (3 - 2 * t); // smoothstep: gentle at the edge, firm at the center
+          targetX = clampedX + (nearestCX - clampedX) * pull;
+          targetY = clampedY + (nearestCY - clampedY) * pull;
         }
-        
-        if (foundTarget !== hoveredTankId.value) {
-          hoveredTankId.value = foundTarget;
-          if (foundTarget !== null) {
+        translateX.value = targetX - initialX;
+        translateY.value = targetY - initialY;
+
+        let nextHovered = hoveredTankId.value;
+        if (nearestId !== null && nearestDist < CAPTURE_RADIUS) {
+          nextHovered = nearestId;
+        } else if (nextHovered !== null && hoveredDist > RELEASE_RADIUS) {
+          nextHovered = null;
+        }
+
+        if (nextHovered !== hoveredTankId.value) {
+          hoveredTankId.value = nextHovered;
+          if (nextHovered !== null) {
             runOnJS(triggerHoverVibration)();
           }
         }
@@ -260,25 +335,14 @@ export function FloatingExpensePoint({
       isDragging.value = false;
       
       if (isFocused) {
-        let target: number | null = null;
-        for (const key in tankRects.value) {
-          const rect = tankRects.value[Number(key)];
-          if (
-            event.absoluteX >= rect.x &&
-            event.absoluteX <= rect.x + rect.width &&
-            event.absoluteY >= rect.y &&
-            event.absoluteY <= rect.y + rect.height
-          ) {
-            target = Number(key);
-            break;
-          }
-        }
+        const target = hoveredTankId.value;
         
         if (target !== null) {
           runOnJS(handleAssign)(target);
         } else {
           translateX.value = withSpring(centerX - initialX, { damping: 18, stiffness: 180 });
           translateY.value = withSpring(centerY - initialY, { damping: 18, stiffness: 180 });
+          detailsVisible.value = withTiming(1, { duration: 250 });
         }
         hoveredTankId.value = null;
       } else if (isFreeDragging.value) {
@@ -315,6 +379,15 @@ export function FloatingExpensePoint({
     };
   });
 
+  const detailsStyle = useAnimatedStyle(() => {
+    return {
+      opacity: withTiming(detailsVisible.value, { duration: 180 }),
+      transform: [
+        { scale: withSpring(interpolate(detailsVisible.value, [0, 1], [0.8, 1])) },
+      ],
+    };
+  });
+
   const sectionIconName = sectionIcon || 'tag.fill';
   const displayColor = sectionColor || color;
 
@@ -335,21 +408,18 @@ export function FloatingExpensePoint({
         <View style={styles.radialContainer} pointerEvents="box-none">
           {tanks.map((tank, index) => {
             const angle = (index / tanks.length) * Math.PI * 2 - Math.PI / 2;
-            const x = Math.cos(angle) * RADIAL_RADIUS;
-            const y = Math.sin(angle) * RADIAL_RADIUS;
-            
-            const relativeLeft = centerX + x - (initialX - POINT_WIDTH / 2) - TANK_SIZE / 2;
-            const relativeTop = centerY + y - (initialY - POINT_HEIGHT / 2) - TANK_SIZE / 2;
-            
             return (
               <MiniTankTargetView
                 key={tank.ruleId}
                 tank={tank}
-                left={relativeLeft}
-                top={relativeTop}
+                angle={angle}
+                centerX={centerX}
+                centerY={centerY}
+                initialX={initialX}
+                initialY={initialY}
+                detailsVisible={detailsVisible}
                 assigningTankId={assigningTankId}
                 hoveredTankId={hoveredTankId}
-                onMeasured={(rect) => registerTankRect(tank.ruleId, rect)}
                 onPress={() => {
                   handleAssign(tank.ruleId);
                 }}
@@ -399,8 +469,10 @@ export function FloatingExpensePoint({
               top: centerY + 100 - (initialY - POINT_HEIGHT / 2),
               backgroundColor: theme.backgroundElement,
               borderColor: theme.backgroundSelected,
-            }
+            },
+            detailsStyle
           ]}
+          pointerEvents={assigningTankId !== null ? "none" : "auto"}
         >
           <View style={styles.detailsCardHeader}>
             <View style={[styles.detailsSectionIcon, { backgroundColor: displayColor + '1F' }]}>
@@ -434,24 +506,31 @@ export function FloatingExpensePoint({
   );
 }
 
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
 function MiniTankTargetView({
   tank,
-  left,
-  top,
-  onMeasured,
+  angle,
+  centerX,
+  centerY,
+  initialX,
+  initialY,
+  detailsVisible,
   onPress,
   assigningTankId,
   hoveredTankId,
 }: {
   tank: MiniTankTarget;
-  left: number;
-  top: number;
-  onMeasured: (rect: Rect) => void;
+  angle: number;
+  centerX: number;
+  centerY: number;
+  initialX: number;
+  initialY: number;
+  detailsVisible: SharedValue<number>;
   onPress: () => void;
   assigningTankId: number | null;
   hoveredTankId: SharedValue<number | null>;
 }) {
-  const ref = useRef<View>(null);
   const scale = useSharedValue(0.5);
   const opacity = useSharedValue(0);
 
@@ -467,12 +546,6 @@ function MiniTankTargetView({
     }
   }, [assigningTankId, tank.ruleId, scale, opacity]);
 
-  function handleLayout() {
-    ref.current?.measureInWindow((x, y, width, height) => {
-      onMeasured({ x, y, width, height });
-    });
-  }
-
   const animatedStyle = useAnimatedStyle(() => {
     const isHovered = hoveredTankId.value === tank.ruleId;
     const isAssigned = assigningTankId === tank.ruleId;
@@ -481,9 +554,9 @@ function MiniTankTargetView({
     if (isAssigned) {
       currentScale = scale.value;
     } else if (isHovered) {
-      currentScale = withSpring(1.3, { damping: 12, stiffness: 180 });
+      currentScale = withSpring(1.3, { damping: 24, stiffness: 500 });
     } else {
-      currentScale = withSpring(scale.value, { damping: 12, stiffness: 180 });
+      currentScale = withSpring(scale.value, { damping: 24, stiffness: 500 });
     }
 
     return {
@@ -492,20 +565,49 @@ function MiniTankTargetView({
     };
   });
 
+  const animatedWrapperStyle = useAnimatedStyle(() => {
+    // Calculate dynamic radius and offsets based on detailsVisible
+    const baseRadius = 110;
+    const expandedRadius = 150;
+    const radius = interpolate(detailsVisible.value, [0, 1], [baseRadius, expandedRadius]);
+
+    const cosA = Math.cos(angle);
+    const sinA = Math.sin(angle);
+
+    let xOffset = 0;
+    let yOffset = 0;
+    if (sinA > 0.1) { // bottom targets
+      xOffset = (cosA > 0 ? 35 : -35) * detailsVisible.value;
+      yOffset = -20 * detailsVisible.value;
+    }
+
+    const x = cosA * radius + xOffset;
+    const y = sinA * radius + yOffset;
+
+    const leftPos = centerX + x - (initialX - POINT_WIDTH / 2) - TANK_SIZE / 2;
+    const topPos = centerY + y - (initialY - POINT_HEIGHT / 2) - TANK_SIZE / 2;
+
+    return {
+      transform: [
+        { translateX: leftPos },
+        { translateY: topPos },
+      ],
+    };
+  });
+
   return (
-    <Pressable 
+    <AnimatedPressable 
       onPress={onPress}
       style={[
         styles.miniTankWrapper,
         {
-          left: left,
-          top: top,
-        }
+          left: 0,
+          top: 0,
+        },
+        animatedWrapperStyle
       ]}
     >
       <Animated.View
-        ref={ref}
-        onLayout={handleLayout}
         style={[
           styles.miniTank,
           animatedStyle,
@@ -522,7 +624,7 @@ function MiniTankTargetView({
           {tank.label}
         </ThemedText>
       </Animated.View>
-    </Pressable>
+    </AnimatedPressable>
   );
 }
 
