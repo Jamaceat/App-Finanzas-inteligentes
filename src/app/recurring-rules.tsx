@@ -13,7 +13,6 @@ import {
   archiveRecurringRule,
   createRecurringRule,
   listActiveRecurringRules,
-  updateRecurringRule,
   type CustomIntervalUnit,
   type RecurringFrequency,
   type RecurringKind,
@@ -169,7 +168,7 @@ function RuleRow({
       </Pressable>
       <Pressable onPress={onArchive} style={({ pressed }) => pressed && styles.pressed}>
         <ThemedText type="small" style={{ color: '#E5484D' }}>
-          Archivar
+          Desactivar
         </ThemedText>
       </Pressable>
     </ThemedView>
@@ -248,7 +247,10 @@ function RuleForm({
     const isCustom = frequency === 'custom';
 
     if (editing) {
-      await updateRecurringRule(editing.id, {
+      // Desactivar regla anterior para preservar el historial de ciclos pasados
+      await archiveRecurringRule(editing.id);
+      // Crear nueva versión de la regla con los cambios aplicados
+      await createRecurringRule({
         sectionId: resolvedSectionId,
         label: trimmedLabel,
         kind,
@@ -256,7 +258,7 @@ function RuleForm({
         customIntervalValue: isCustom ? customValueNumber : null,
         customIntervalUnit: isCustom ? customUnit : null,
         isVariableAmount,
-        estimatedAmount,
+        estimatedAmount: estimatedAmount ?? undefined,
         nextDueDate: startDate,
         reminderEnabled,
       });

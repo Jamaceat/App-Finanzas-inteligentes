@@ -197,40 +197,95 @@ export function computeFreeCashTank(
   transactions: Transaction[],
   windowStart: Date,
 ): FreeCashTank {
+  const activeRuleIds = new Set(rules.map((r) => r.id));
+
+  // 1. Free/non-recurring incomes (all time)
+  const freeIncomeAllTime = transactions
+    .filter((t) => t.kind === 'income' && t.recurringRuleId === null)
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  // 2. Free/non-recurring expenses (all time)
+  // Note: Only count expenses that are not allocated to any active recurring rule
+  const freeExpenseAllTime = transactions
+    .filter((t) => t.kind === 'expense' && t.allocatedIncomeRuleId === null)
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  // 3. Leftover from closed cycles of active recurring income rules
+  const activeRulesLeftover = rules
+    .filter((rule) => rule.kind === 'income' && !rule.archivedAt)
+    .reduce((total, rule) => {
+      const { start: currentStart } = getCycleWindow(rule);
+      let cycleEnd = currentStart;
+      let ruleLeftover = 0;
+      let iterations = 0;
+
+      // Find oldest transaction to set a sensible boundary
+      const oldestTxDate = transactions.reduce(
+        (oldest, t) => (t.occurredAt < oldest ? t.occurredAt : oldest),
+        new Date(),
+      );
+
+      while (cycleEnd > oldestTxDate && iterations < 500) {
+        iterations++;
+        const cycleStart = stepBack(
+          cycleEnd,
+          rule.frequency,
+          rule.customIntervalValue,
+          rule.customIntervalUnit,
+        );
+        const window = { start: cycleStart, end: cycleEnd };
+        const received = sumInWindow(
+          transactions,
+          (t) => t.kind === 'income' && t.recurringRuleId === rule.id,
+          window,
+        );
+        const allocated = sumInWindow(
+          transactions,
+          (t) => t.kind === 'expense' && t.allocatedIncomeRuleId === rule.id,
+          window,
+        );
+        ruleLeftover += Math.max(0, received - allocated);
+        cycleEnd = cycleStart;
+      }
+      return total + ruleLeftover;
+    }, 0);
+
+  // 4. Leftover from archived rules
+  const archivedIncomes = transactions
+    .filter(
+      (t) =>
+        t.kind === 'income' &&
+        t.recurringRuleId !== null &&
+        !activeRuleIds.has(t.recurringRuleId),
+    )
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  const archivedExpenses = transactions
+    .filter(
+      (t) =>
+        t.kind === 'expense' &&
+        t.allocatedIncomeRuleId !== null &&
+        !activeRuleIds.has(t.allocatedIncomeRuleId),
+    )
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  const archivedLeftover = Math.max(0, archivedIncomes - archivedExpenses);
+
+  // Level is: all free incomes minus all free expenses plus leftovers from closed active and archived cycles
+  const level = Math.max(0, freeIncomeAllTime - freeExpenseAllTime) + activeRulesLeftover + archivedLeftover;
+
+  // Capacity is the non-recurring incomes in the current window
   const now = new Date();
   const window = { start: windowStart, end: now };
-
   const freeIncomeInWindow = sumInWindow(
     transactions,
     (t) => t.kind === 'income' && t.recurringRuleId === null,
     window,
   );
-  const freeExpenseInWindow = sumInWindow(
-    transactions,
-    (t) => t.kind === 'expense' && t.recurringRuleId === null,
-    window,
-  );
-
-  const leftoverFromClosedCycles = rules
-    .filter((rule) => rule.kind === 'income' && !rule.archivedAt)
-    .reduce((total, rule) => {
-      const previousWindow = getPreviousCycleWindow(rule);
-      const received = sumInWindow(
-        transactions,
-        (t) => t.kind === 'income' && t.recurringRuleId === rule.id,
-        previousWindow,
-      );
-      const allocated = sumInWindow(
-        transactions,
-        (t) => t.kind === 'expense' && t.allocatedIncomeRuleId === rule.id,
-        previousWindow,
-      );
-      return total + Math.max(0, received - allocated);
-    }, 0);
 
   return {
     capacity: Math.max(freeIncomeInWindow, 1),
-    level: Math.max(0, freeIncomeInWindow - freeExpenseInWindow) + leftoverFromClosedCycles,
+    level,
   };
 }
 
