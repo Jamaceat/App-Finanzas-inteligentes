@@ -22,6 +22,7 @@ import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
 import { TANK_COLOR, FREE_TANK_COLOR } from '@/constants/constants';
 import { useTheme } from '@/hooks/use-theme';
+import { useBubbleFrontOrder } from '@/hooks/use-bubble-front-order';
 
 const WAVE_PATH_BACK = 'M 0 100 C 25 90, 55 60, 85 25 T 100 0 L 100 100 Z';
 const WAVE_PATH_FRONT = 'M 0 100 C 35 95, 65 65, 95 35 T 100 0 L 100 100 Z';
@@ -96,6 +97,7 @@ export function PocketWidget({
   const [state, setState] = useState<WidgetState>('collapsed');
   const [selectedTankId, setSelectedTankId] = useState<number | null>(null);
   const [selectedExpense, setSelectedExpense] = useState<PocketExpense | null>(null);
+  const { bringToFront, getZIndex } = useBubbleFrontOrder();
 
   const progress = useSharedValue(0);
 
@@ -272,6 +274,8 @@ export function PocketWidget({
                     label={tank.label}
                     sublabel={`${expensesByTank.get(tank.ruleId)?.length ?? 0} gastos`}
                     onPress={() => setSelectedTankId(tank.ruleId)}
+                    zIndex={getZIndex(`tank-${tank.ruleId}`)}
+                    onInteractionStart={() => bringToFront(`tank-${tank.ruleId}`)}
                   />
                 ))}
 
@@ -290,6 +294,8 @@ export function PocketWidget({
                     label={expense.label}
                     sublabel={formatCompactCurrency(expense.amount)}
                     onPress={() => setSelectedExpense(expense)}
+                    zIndex={getZIndex(`expense-${expense.id}`)}
+                    onInteractionStart={() => bringToFront(`expense-${expense.id}`)}
                   />
                 ))}
             </View>
@@ -449,6 +455,8 @@ function FloatingBubble({
   label,
   sublabel,
   onPress,
+  zIndex,
+  onInteractionStart,
 }: {
   index: number;
   total: number;
@@ -456,14 +464,17 @@ function FloatingBubble({
   label: string;
   sublabel: string;
   onPress: () => void;
+  zIndex: number;
+  onInteractionStart: () => void;
 }) {
   const wanderX = useSharedValue(0);
   const wanderY = useSharedValue(0);
   const dragX = useSharedValue(0);
   const dragY = useSharedValue(0);
+  const dragStartX = useSharedValue(0);
+  const dragStartY = useSharedValue(0);
   const scale = useSharedValue(0.4);
   const opacity = useSharedValue(0);
-  const [isFront, setIsFront] = useState(false);
 
   const startWander = () => {
     'worklet';
@@ -500,17 +511,16 @@ function FloatingBubble({
     .onBegin(() => {
       wanderX.value = withTiming(0, { duration: 150 });
       wanderY.value = withTiming(0, { duration: 150 });
-      runOnJS(setIsFront)(true);
+      dragStartX.value = dragX.value;
+      dragStartY.value = dragY.value;
+      runOnJS(onInteractionStart)();
     })
     .onUpdate((event) => {
-      dragX.value = event.translationX;
-      dragY.value = event.translationY;
+      dragX.value = dragStartX.value + event.translationX;
+      dragY.value = dragStartY.value + event.translationY;
     })
     .onEnd(() => {
-      dragX.value = withSpring(0, { damping: 16, stiffness: 140 });
-      dragY.value = withSpring(0, { damping: 16, stiffness: 140 });
       startWander();
-      runOnJS(setIsFront)(false);
     });
 
   const tap = Gesture.Tap().onEnd(() => {
@@ -530,7 +540,7 @@ function FloatingBubble({
 
   return (
     <GestureDetector gesture={gesture}>
-      <View style={[styles.bubbleWrapper, { left: `${left}%`, top: `${top}%`, zIndex: isFront ? 20 : 1 }]}>
+      <View style={[styles.bubbleWrapper, { left: `${left}%`, top: `${top}%`, zIndex }]}>
         <Animated.View style={[styles.bubble, animatedStyle, { backgroundColor: color, shadowColor: color }]}>
           <ThemedText type="smallBold" style={styles.bubbleLabel} numberOfLines={1}>
             {label}

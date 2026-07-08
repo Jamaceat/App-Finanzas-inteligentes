@@ -67,6 +67,8 @@ export function FloatingExpensePoint({
   onAssign,
   vibrationEnabled,
   onPositionChange,
+  zIndex,
+  onInteractionStart,
 }: {
   pointKey: string;
   label: string;
@@ -89,6 +91,8 @@ export function FloatingExpensePoint({
   onAssign: (ruleId: number) => void;
   vibrationEnabled: boolean;
   onPositionChange: (key: string, x: number, y: number) => void;
+  zIndex: number;
+  onInteractionStart: () => void;
 }) {
   const theme = useTheme();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
@@ -100,7 +104,6 @@ export function FloatingExpensePoint({
   const isDimmed = anyFocused && !isFocused;
 
   const [assigningTankId, setAssigningTankId] = useState<number | null>(null);
-  const [isFreeDragFront, setIsFreeDragFront] = useState(false);
 
   const translateX = useSharedValue(screenWidth - 65 - initialX);
   const translateY = useSharedValue(screenHeight - 65 - initialY);
@@ -259,6 +262,7 @@ export function FloatingExpensePoint({
 
   const tap = Gesture.Tap()
     .onEnd(() => {
+      runOnJS(onInteractionStart)();
       runOnJS(onSetFocused)(isFocused ? null : pointKey);
     });
 
@@ -276,7 +280,7 @@ export function FloatingExpensePoint({
         translateY.value = withSpring(clampedY - initialY, { damping: 20, stiffness: 200 });
       } else {
         isFreeDragging.value = true;
-        runOnJS(setIsFreeDragFront)(true);
+        runOnJS(onInteractionStart)();
       }
     })
     .onUpdate((event) => {
@@ -372,7 +376,6 @@ export function FloatingExpensePoint({
         const clampedX = Math.max(POINT_WIDTH / 2, Math.min(screenWidth - POINT_WIDTH / 2, targetX));
         const clampedY = Math.max(POINT_HEIGHT / 2, Math.min(screenHeight - POINT_HEIGHT / 2, targetY));
         runOnJS(onPositionChange)(pointKey, clampedX, clampedY);
-        runOnJS(setIsFreeDragFront)(false);
         startWander();
       }
     });
@@ -419,7 +422,7 @@ export function FloatingExpensePoint({
         { 
           left: initialX - POINT_WIDTH / 2,
           top: initialY - POINT_HEIGHT / 2,
-          zIndex: isFocused || isFreeDragFront ? 20 : 1,
+          zIndex: isFocused ? 1000 : zIndex,
         }
       ]}
       pointerEvents={isDimmed ? "none" : "box-none"}

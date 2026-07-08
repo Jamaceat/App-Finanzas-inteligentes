@@ -23,6 +23,7 @@ import {
 } from '@/db/queries/transactions';
 import { computeIncomeTanks, computePendingExpenses, type PendingExpense } from '@/db/queries/tanks';
 import { watchAppSettingsRow } from '@/db/queries/settings';
+import { useBubbleFrontOrder } from '@/hooks/use-bubble-front-order';
 
 const EXPENSE_POINT_COLOR = '#E5484D';
 
@@ -73,6 +74,7 @@ export default function AsignarGastosScreen() {
 
   const [focusedPointKey, setFocusedPointKey] = useState<string | null>(null);
   const [customPositions, setCustomPositions] = useState<Record<string, { x: number; y: number }>>({});
+  const { bringToFront, getZIndex } = useBubbleFrontOrder();
 
   const incomeTanks = useMemo(() => computeIncomeTanks(rules, transactions), [rules, transactions]);
   const pendingExpenses = useMemo(() => computePendingExpenses(rules), [rules]);
@@ -260,6 +262,8 @@ export default function AsignarGastosScreen() {
                 onPositionChange={(key: string, x: number, y: number) => {
                   setCustomPositions((prev) => ({ ...prev, [key]: { x, y } }));
                 }}
+                zIndex={getZIndex(point.key)}
+                onInteractionStart={() => bringToFront(point.key)}
               />
             );
           })}
