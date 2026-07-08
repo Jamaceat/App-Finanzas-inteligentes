@@ -24,6 +24,7 @@ import { SymbolView, type AndroidSymbol, type SFSymbol } from 'expo-symbols';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { TankSearchModal, type SearchTankItem } from '@/components/tank-search-modal';
+import { Tank } from '@/components/tank';
 
 function symbol(ios: SFSymbol, android: AndroidSymbol) {
   return { ios, android, web: android };
@@ -748,42 +749,7 @@ function CoverflowItem({
   );
 }
 
-function Tank({
-  label,
-  amount,
-  capacity,
-  color,
-  tilt,
-}: {
-  label: string;
-  amount: number;
-  capacity: number;
-  color: string;
-  tilt: SharedValue<number>;
-}) {
-  const ratio = Math.max(0, Math.min(1, amount / capacity));
-  const animatedTilt = useDerivedValue(() => {
-    return withSpring(tilt.value);
-  });
-  const fillStyle = useAnimatedStyle(() => ({
-    height: withTiming(`${ratio * 100}%`, { duration: TANK_FILL_ANIMATION_DURATION_MS }),
-    transform: [{ rotate: `${animatedTilt.value}deg` }],
-  }));
 
-  return (
-    <View style={styles.tankWrapper}>
-      <ThemedView type="backgroundElement" style={styles.tankBody}>
-        <Animated.View style={[styles.tankFill, { backgroundColor: color }, fillStyle]} />
-      </ThemedView>
-      <ThemedText type="smallBold" numberOfLines={1}>
-        {label}
-      </ThemedText>
-      <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
-        {formatCurrency(amount)}
-      </ThemedText>
-    </View>
-  );
-}
 
 function PendingExpenseCard({
   expense,
@@ -1018,25 +984,7 @@ const styles = StyleSheet.create({
   edgeZoneRight: {
     right: 0,
   },
-  tankWrapper: {
-    alignItems: 'center',
-    gap: Spacing.one,
-    width: TANK_ITEM_WIDTH,
-  },
-  tankBody: {
-    width: TANK_WIDTH,
-    height: TANK_HEIGHT,
-    borderRadius: Spacing.three,
-    overflow: 'hidden',
-    justifyContent: 'flex-end',
-    alignSelf: 'center',
-  },
-  tankFill: {
-    width: '130%',
-    alignSelf: 'center',
-    borderTopLeftRadius: Spacing.two,
-    borderTopRightRadius: Spacing.two,
-  },
+
   pendingSection: {
     gap: Spacing.two,
     paddingHorizontal: Spacing.four,
