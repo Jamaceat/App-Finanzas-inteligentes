@@ -1,0 +1,1 @@
+ALTER TABLE `app_settings` ADD `allow_partial_tank_assignment` integer DEFAULT false NOT NULL;

@@ -14,20 +14,10 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { formatCurrency } from '@/lib/format';
 
 function symbol(ios: SFSymbol, android: AndroidSymbol) {
   return { ios, android, web: android };
-}
-
-const currencyFormatter = new Intl.NumberFormat('es-AR', {
-  style: 'currency',
-  currency: 'ARS',
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
-function formatCurrency(amount: number): string {
-  return currencyFormatter.format(amount);
 }
 
 export type SearchTankItem = {

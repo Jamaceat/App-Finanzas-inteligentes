@@ -87,6 +87,9 @@ export const appSettings = sqliteTable('app_settings', {
     .notNull()
     .default(false),
   transactionsPageSize: integer('transactions_page_size').notNull().default(20),
+  allowPartialTankAssignment: integer('allow_partial_tank_assignment', { mode: 'boolean' })
+    .notNull()
+    .default(false),
   updatedAt: integer('updated_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),

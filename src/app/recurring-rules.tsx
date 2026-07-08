@@ -3,14 +3,19 @@ import { useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { SymbolView, type AndroidSymbol, type SFSymbol } from 'expo-symbols';
 
+import { FilterChip } from '@/components/filter-chip';
+import { PaginationControls } from '@/components/pagination-controls';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { DEFAULT_SIMULATION_OCCURRENCES } from '@/constants/constants';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { usePagination } from '@/hooks/use-pagination';
 import {
   archiveRecurringRule,
+  countActiveRecurringRules,
   createRecurringRule,
   listActiveRecurringRules,
   type CustomIntervalUnit,
@@ -21,6 +26,10 @@ import { getOrCreateDefaultSection, listActiveSections } from '@/db/queries/sect
 import { watchAppSettingsRow } from '@/db/queries/settings';
 import { advanceDate } from '@/db/queries/tanks';
 import { cancelRuleReminder } from '@/lib/notifications';
+
+function symbol(ios: SFSymbol, android: AndroidSymbol) {
+  return { ios, android, web: android };
+}
 
 const currencyFormatter = new Intl.NumberFormat('es-AR', {
   style: 'currency',
@@ -80,13 +89,35 @@ function frequencyDescription(rule: Rule): string | undefined {
   return `Cada ${rule.customIntervalValue ?? 1} ${(unitLabel ?? 'Días').toLowerCase()}`;
 }
 
+const RULES_PAGE_SIZE = 10;
+
 export default function RecurringRulesScreen() {
   const params = useLocalSearchParams<{ kind?: RecurringKind; variable?: string }>();
-  const { data: rules } = useLiveQuery(listActiveRecurringRules());
+  const [kindFilter, setKindFilter] = useState<RecurringKind | undefined>(params.kind);
+  const [searchText, setSearchText] = useState('');
   const { data: sections } = useLiveQuery(listActiveSections());
   const { data: settingsRows } = useLiveQuery(watchAppSettingsRow());
   const settings = settingsRows?.[0];
   const [editingId, setEditingId] = useState<number | null>(null);
+
+  const { data: ruleCountRows } = useLiveQuery(
+    countActiveRecurringRules({ kind: kindFilter, search: searchText }),
+    [kindFilter, searchText],
+  );
+  const pagination = usePagination({
+    pageSize: RULES_PAGE_SIZE,
+    totalCount: ruleCountRows[0]?.count ?? 0,
+    resetKey: `${kindFilter ?? 'all'}:${searchText}`,
+  });
+  const { data: rules } = useLiveQuery(
+    listActiveRecurringRules({
+      kind: kindFilter,
+      search: searchText,
+      limit: pagination.pageSize,
+      offset: pagination.offset,
+    }),
+    [kindFilter, searchText, pagination.offset, pagination.pageSize],
+  );
 
   const editingRule = rules.find((rule) => rule.id === editingId);
   const simulationOccurrences = settings?.calendarSimulationOccurrences ?? DEFAULT_SIMULATION_OCCURRENCES;
@@ -115,6 +146,24 @@ export default function RecurringRulesScreen() {
             onDone={() => setEditingId(null)}
           />
 
+          <RuleSearchBar value={searchText} onChangeText={setSearchText} />
+
+          <View style={styles.chipRow}>
+            <FilterChip label="Todas" selected={kindFilter === undefined} onPress={() => setKindFilter(undefined)} />
+            <FilterChip label="Gasto" selected={kindFilter === 'expense'} onPress={() => setKindFilter('expense')} />
+            <FilterChip label="Ingreso" selected={kindFilter === 'income'} onPress={() => setKindFilter('income')} />
+          </View>
+
+          <PaginationControls
+            page={pagination.page}
+            pageCount={pagination.pageCount}
+            hasPreviousPage={pagination.hasPreviousPage}
+            hasNextPage={pagination.hasNextPage}
+            onPrevious={pagination.goToPreviousPage}
+            onNext={pagination.goToNextPage}
+            onGoToPage={pagination.goToPage}
+          />
+
           <ThemedView style={styles.list}>
             {rules.length === 0 && (
               <ThemedText themeColor="textSecondary">Sin reglas recurrentes todavía.</ThemedText>
@@ -136,8 +185,46 @@ export default function RecurringRulesScreen() {
               />
             ))}
           </ThemedView>
+
+          <PaginationControls
+            page={pagination.page}
+            pageCount={pagination.pageCount}
+            hasPreviousPage={pagination.hasPreviousPage}
+            hasNextPage={pagination.hasNextPage}
+            onPrevious={pagination.goToPreviousPage}
+            onNext={pagination.goToNextPage}
+            onGoToPage={pagination.goToPage}
+          />
         </ScrollView>
       </SafeAreaView>
+    </ThemedView>
+  );
+}
+
+function RuleSearchBar({
+  value,
+  onChangeText,
+}: {
+  value: string;
+  onChangeText: (text: string) => void;
+}) {
+  const theme = useTheme();
+  return (
+    <ThemedView type="backgroundElement" style={styles.searchBar}>
+      <SymbolView name={symbol('magnifyingglass', 'search')} tintColor={theme.textSecondary} size={18} />
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        placeholder="Buscar por nombre..."
+        placeholderTextColor={theme.textSecondary}
+        style={[styles.searchInput, { color: theme.text }]}
+        clearButtonMode="while-editing"
+      />
+      {value.length > 0 && (
+        <Pressable onPress={() => onChangeText('')} style={({ pressed }) => pressed && styles.pressed}>
+          <SymbolView name={symbol('xmark.circle.fill', 'cancel')} tintColor={theme.textSecondary} size={16} />
+        </Pressable>
+      )}
     </ThemedView>
   );
 }
@@ -703,6 +790,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: Spacing.one,
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+    borderRadius: Spacing.three,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 15,
+    padding: 0,
   },
   chip: {
     paddingVertical: Spacing.one,

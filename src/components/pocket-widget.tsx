@@ -1,13 +1,27 @@
+/* eslint-disable react-hooks/immutability */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Modal, Pressable, StyleSheet, View, Vibration, BackHandler, useWindowDimensions } from 'react-native';
+import {
+  Modal,
+  Pressable,
+  StyleSheet,
+  View,
+  Vibration,
+  BackHandler,
+  ScrollView,
+  useWindowDimensions,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { SymbolView, type AndroidSymbol, type SFSymbol } from 'expo-symbols';
 import Svg, { Path } from 'react-native-svg';
 import Animated, {
   Easing,
+  cancelAnimation,
   interpolate,
   interpolateColor,
   runOnJS,
+  runOnUI,
   useAnimatedStyle,
   useSharedValue,
   withDelay,
@@ -19,10 +33,22 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { ThemedText } from '@/components/themed-text';
+import { FilterChip } from '@/components/filter-chip';
 import { Spacing } from '@/constants/theme';
-import { TANK_COLOR, FREE_TANK_COLOR } from '@/constants/constants';
+import {
+  TANK_COLOR,
+  FREE_TANK_COLOR,
+  POCKET_BUBBLE_SIZE_MIN,
+  POCKET_BUBBLE_SIZE_MAX,
+  POCKET_GRID_GAP,
+  POCKET_GRID_PADDING,
+  POCKET_WANDER_AMPLITUDE,
+  BUBBLE_DRAG_LONG_PRESS_MS,
+} from '@/constants/constants';
 import { useTheme } from '@/hooks/use-theme';
 import { useBubbleFrontOrder } from '@/hooks/use-bubble-front-order';
+import { formatCompactCurrency, formatCurrency } from '@/lib/format';
+import { bubbleScale, referenceAmount } from '@/lib/bubble-visuals';
 
 const WAVE_PATH_BACK = 'M 0 100 C 25 90, 55 60, 85 25 T 100 0 L 100 100 Z';
 const WAVE_PATH_FRONT = 'M 0 100 C 35 95, 65 65, 95 35 T 100 0 L 100 100 Z';
@@ -35,29 +61,6 @@ const WAVE_DOTS = [
 
 function symbol(ios: SFSymbol, android: AndroidSymbol) {
   return { ios, android, web: android };
-}
-
-const currencyFormatter = new Intl.NumberFormat('es-AR', {
-  style: 'currency',
-  currency: 'ARS',
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
-function formatCurrency(amount: number): string {
-  return currencyFormatter.format(amount);
-}
-
-function formatCompactCurrency(amount: number): string {
-  if (amount >= 1_000_000) {
-    const val = amount / 1_000_000;
-    return `$${val.toFixed(val % 1 === 0 ? 0 : 1)}M`;
-  }
-  if (amount >= 1_000) {
-    const val = amount / 1_000;
-    return `$${val.toFixed(val % 1 === 0 ? 0 : 1)}K`;
-  }
-  return formatCurrency(amount);
 }
 
 export type PocketTank = {
@@ -75,9 +78,31 @@ export type PocketExpense = {
 };
 
 type WidgetState = 'collapsed' | 'corner' | 'fullscreen';
+type SortBy = 'amount' | 'date' | 'name';
 
 const COLLAPSED_SIZE = 130;
 const CORNER_SIZE = 250;
+
+// Grid en px del campo scrolleable: cols se calcula para que quepa al menos una
+// burbuja al tamaño máximo por celda; el resto se reparte en filas parejas.
+function computeGridConfig(itemCount: number, containerWidth: number) {
+  const usableWidth = Math.max(containerWidth - POCKET_GRID_PADDING * 2, POCKET_BUBBLE_SIZE_MAX);
+  const cols = Math.max(2, Math.floor((usableWidth + POCKET_GRID_GAP) / (POCKET_BUBBLE_SIZE_MAX + POCKET_GRID_GAP)));
+  const cell = (usableWidth - (cols - 1) * POCKET_GRID_GAP) / cols;
+  const rows = Math.max(1, Math.ceil(itemCount / cols));
+  return { cols, cell, rows };
+}
+
+function gridCellCenter(index: number, cols: number, cell: number): { x: number; y: number } {
+  const col = index % cols;
+  const row = Math.floor(index / cols);
+  const jitterSeed = Math.sin(index * 12.9898) * 43758.5453;
+  const jitter = jitterSeed - Math.floor(jitterSeed);
+  return {
+    x: POCKET_GRID_PADDING + col * (cell + POCKET_GRID_GAP) + cell / 2 + (jitter - 0.5) * 16,
+    y: POCKET_GRID_PADDING + row * (cell + POCKET_GRID_GAP) + cell / 2 + (0.5 - jitter) * 16,
+  };
+}
 
 export function PocketWidget({
   tanks,
@@ -97,6 +122,9 @@ export function PocketWidget({
   const [state, setState] = useState<WidgetState>('collapsed');
   const [selectedTankId, setSelectedTankId] = useState<number | null>(null);
   const [selectedExpense, setSelectedExpense] = useState<PocketExpense | null>(null);
+  const [sortBy, setSortBy] = useState<SortBy>('amount');
+  const [visibleRange, setVisibleRange] = useState({ top: 0, bottom: screenHeight });
+  const [trackedTankId, setTrackedTankId] = useState(selectedTankId);
   const { bringToFront, getZIndex } = useBubbleFrontOrder();
 
   const progress = useSharedValue(0);
@@ -111,8 +139,79 @@ export function PocketWidget({
     return map;
   }, [expenses]);
 
+  const tankTotals = useMemo(() => {
+    const map = new Map<number, { total: number; latestDate: number }>();
+    for (const [ruleId, list] of expensesByTank) {
+      const total = list.reduce((sum, e) => sum + e.amount, 0);
+      const latestDate = list.reduce((latest, e) => Math.max(latest, e.occurredAt.getTime()), 0);
+      map.set(ruleId, { total, latestDate });
+    }
+    return map;
+  }, [expensesByTank]);
+
+  const sortedTanks = useMemo(() => {
+    const list = [...tanks];
+    if (sortBy === 'amount') {
+      list.sort((a, b) => (tankTotals.get(b.ruleId)?.total ?? 0) - (tankTotals.get(a.ruleId)?.total ?? 0));
+    } else if (sortBy === 'date') {
+      list.sort((a, b) => (tankTotals.get(b.ruleId)?.latestDate ?? 0) - (tankTotals.get(a.ruleId)?.latestDate ?? 0));
+    } else {
+      list.sort((a, b) => a.label.localeCompare(b.label));
+    }
+    return list;
+  }, [tanks, tankTotals, sortBy]);
+
   const selectedTank = tanks.find((t) => t.ruleId === selectedTankId) ?? null;
-  const selectedTankExpenses = selectedTankId !== null ? expensesByTank.get(selectedTankId) ?? [] : [];
+  const selectedTankExpenses = useMemo(
+    () => (selectedTankId !== null ? expensesByTank.get(selectedTankId) ?? [] : []),
+    [selectedTankId, expensesByTank],
+  );
+
+  const sortedTankExpenses = useMemo(() => {
+    const list = [...selectedTankExpenses];
+    if (sortBy === 'amount') {
+      list.sort((a, b) => b.amount - a.amount);
+    } else if (sortBy === 'date') {
+      list.sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime());
+    } else {
+      list.sort((a, b) => a.label.localeCompare(b.label));
+    }
+    return list;
+  }, [selectedTankExpenses, sortBy]);
+
+  const tankAmountReference = useMemo(
+    () => referenceAmount(sortedTanks.map((tank) => tankTotals.get(tank.ruleId)?.total ?? 0)),
+    [sortedTanks, tankTotals],
+  );
+  const expenseAmountReference = useMemo(
+    () => referenceAmount(sortedTankExpenses.map((expense) => expense.amount)),
+    [sortedTankExpenses],
+  );
+  const tankExpenseTotal = useMemo(
+    () => sortedTankExpenses.reduce((sum, expense) => sum + expense.amount, 0),
+    [sortedTankExpenses],
+  );
+
+  const activeCount = selectedTank ? sortedTankExpenses.length : sortedTanks.length;
+  const gridConfig = useMemo(() => computeGridConfig(activeCount, screenWidth), [activeCount, screenWidth]);
+  const contentHeight =
+    POCKET_GRID_PADDING * 2 +
+    gridConfig.rows * gridConfig.cell +
+    Math.max(0, gridConfig.rows - 1) * POCKET_GRID_GAP +
+    POCKET_BUBBLE_SIZE_MAX / 2;
+
+  // Al cambiar de nivel (tanques <-> dentro de un tanque) el ScrollView se
+  // remonta y vuelve al top: seguimos ese patrón durante el render en vez de
+  // un efecto, siguiendo el idiom de usePagination.
+  if (selectedTankId !== trackedTankId) {
+    setTrackedTankId(selectedTankId);
+    setVisibleRange({ top: 0, bottom: screenHeight });
+  }
+
+  function handleScroll(event: NativeSyntheticEvent<NativeScrollEvent>) {
+    const { contentOffset, layoutMeasurement } = event.nativeEvent;
+    setVisibleRange({ top: contentOffset.y, bottom: contentOffset.y + layoutMeasurement.height });
+  }
 
   const updateState = useCallback(
     (newState: WidgetState) => {
@@ -259,46 +358,85 @@ export function PocketWidget({
             )}
             {selectedTank && (
               <ThemedText type="small" themeColor="textSecondary" style={styles.fullscreenSubtitle}>
-                Gastos asignados a {selectedTank.label}.
+                Gastos asignados a {selectedTank.label} · {sortedTankExpenses.length} ·{' '}
+                {formatCompactCurrency(tankExpenseTotal)}
               </ThemedText>
             )}
 
-            <View style={styles.bubbleField} pointerEvents="box-none">
-              {!selectedTank &&
-                tanks.map((tank, index) => (
-                  <FloatingBubble
-                    key={tank.ruleId}
-                    index={index}
-                    total={tanks.length}
-                    color={tank.color}
-                    label={tank.label}
-                    sublabel={`${expensesByTank.get(tank.ruleId)?.length ?? 0} gastos`}
-                    onPress={() => setSelectedTankId(tank.ruleId)}
-                    zIndex={getZIndex(`tank-${tank.ruleId}`)}
-                    onInteractionStart={() => bringToFront(`tank-${tank.ruleId}`)}
-                  />
-                ))}
-
-              {selectedTank && selectedTankExpenses.length === 0 && (
-                <View style={styles.emptyTankState}>
-                  <ThemedText themeColor="textSecondary">Este tanque no tiene gastos asignados.</ThemedText>
-                </View>
-              )}
-              {selectedTank &&
-                selectedTankExpenses.map((expense, index) => (
-                  <FloatingBubble
-                    key={expense.id}
-                    index={index}
-                    total={selectedTankExpenses.length}
-                    color={selectedTank.color}
-                    label={expense.label}
-                    sublabel={formatCompactCurrency(expense.amount)}
-                    onPress={() => setSelectedExpense(expense)}
-                    zIndex={getZIndex(`expense-${expense.id}`)}
-                    onInteractionStart={() => bringToFront(`expense-${expense.id}`)}
-                  />
-                ))}
+            <View style={styles.sortRow}>
+              <FilterChip label="Monto" selected={sortBy === 'amount'} onPress={() => setSortBy('amount')} />
+              <FilterChip label="Fecha" selected={sortBy === 'date'} onPress={() => setSortBy('date')} />
+              <FilterChip label="Nombre" selected={sortBy === 'name'} onPress={() => setSortBy('name')} />
             </View>
+
+            {selectedTank && sortedTankExpenses.length === 0 ? (
+              <View style={styles.emptyTankState}>
+                <ThemedText themeColor="textSecondary">Este tanque no tiene gastos asignados.</ThemedText>
+              </View>
+            ) : (
+              <ScrollView
+                key={selectedTank ? `tank-${selectedTank.ruleId}` : 'tanks'}
+                style={styles.bubbleField}
+                contentContainerStyle={{ height: contentHeight }}
+                onScroll={handleScroll}
+                scrollEventThrottle={100}
+              >
+                <View style={{ height: contentHeight }} pointerEvents="box-none">
+                  {!selectedTank &&
+                    sortedTanks.map((tank, index) => {
+                      const { x, y } = gridCellCenter(index, gridConfig.cols, gridConfig.cell);
+                      const total = tankTotals.get(tank.ruleId)?.total ?? 0;
+                      const size = bubbleScale(total, tankAmountReference, POCKET_BUBBLE_SIZE_MIN, POCKET_BUBBLE_SIZE_MAX);
+                      const paused = y + size / 2 < visibleRange.top - gridConfig.cell || y - size / 2 > visibleRange.bottom + gridConfig.cell;
+                      return (
+                        <FloatingBubble
+                          key={tank.ruleId}
+                          x={x}
+                          y={y}
+                          size={size}
+                          wanderAmp={POCKET_WANDER_AMPLITUDE}
+                          fieldWidth={screenWidth}
+                          fieldHeight={contentHeight}
+                          paused={paused}
+                          color={tank.color}
+                          label={tank.label}
+                          sublabel={`${expensesByTank.get(tank.ruleId)?.length ?? 0} gastos`}
+                          onPress={() => setSelectedTankId(tank.ruleId)}
+                          zIndex={getZIndex(`tank-${tank.ruleId}`)}
+                          onInteractionStart={() => bringToFront(`tank-${tank.ruleId}`)}
+                          vibrationEnabled={vibrationEnabled}
+                        />
+                      );
+                    })}
+
+                  {selectedTank &&
+                    sortedTankExpenses.map((expense, index) => {
+                      const { x, y } = gridCellCenter(index, gridConfig.cols, gridConfig.cell);
+                      const size = bubbleScale(expense.amount, expenseAmountReference, POCKET_BUBBLE_SIZE_MIN, POCKET_BUBBLE_SIZE_MAX);
+                      const paused = y + size / 2 < visibleRange.top - gridConfig.cell || y - size / 2 > visibleRange.bottom + gridConfig.cell;
+                      return (
+                        <FloatingBubble
+                          key={expense.id}
+                          x={x}
+                          y={y}
+                          size={size}
+                          wanderAmp={POCKET_WANDER_AMPLITUDE}
+                          fieldWidth={screenWidth}
+                          fieldHeight={contentHeight}
+                          paused={paused}
+                          color={selectedTank.color}
+                          label={expense.label}
+                          sublabel={formatCompactCurrency(expense.amount)}
+                          onPress={() => setSelectedExpense(expense)}
+                          zIndex={getZIndex(`expense-${expense.id}`)}
+                          onInteractionStart={() => bringToFront(`expense-${expense.id}`)}
+                          vibrationEnabled={vibrationEnabled}
+                        />
+                      );
+                    })}
+                </View>
+              </ScrollView>
+            )}
           </Animated.View>
         )}
       </Animated.View>
@@ -449,23 +587,35 @@ function PeekDot({
 }
 
 function FloatingBubble({
-  index,
-  total,
+  x,
+  y,
+  size,
+  wanderAmp,
+  fieldWidth,
+  fieldHeight,
+  paused,
   color,
   label,
   sublabel,
   onPress,
   zIndex,
   onInteractionStart,
+  vibrationEnabled,
 }: {
-  index: number;
-  total: number;
+  x: number;
+  y: number;
+  size: number;
+  wanderAmp: number;
+  fieldWidth: number;
+  fieldHeight: number;
+  paused: boolean;
   color: string;
   label: string;
   sublabel: string;
   onPress: () => void;
   zIndex: number;
   onInteractionStart: () => void;
+  vibrationEnabled: boolean;
 }) {
   const wanderX = useSharedValue(0);
   const wanderY = useSharedValue(0);
@@ -478,7 +628,7 @@ function FloatingBubble({
 
   const startWander = () => {
     'worklet';
-    const amp = 12 + Math.random() * 12;
+    const amp = wanderAmp * (0.6 + Math.random() * 0.6);
     const dur = 2200 + Math.random() * 1800;
     wanderX.value = withRepeat(
       withSequence(
@@ -501,26 +651,52 @@ function FloatingBubble({
   useEffect(() => {
     scale.value = withSpring(1, { damping: 14, stiffness: 160 });
     opacity.value = withTiming(1, { duration: 200 });
-    startWander();
+    if (!paused) startWander();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const { left, top } = useMemo(() => layoutForIndex(index, total), [index, total]);
+  // Pausa/reanuda el vaivén cuando la burbuja sale/entra del viewport visible
+  // del ScrollView: acota los loops activos a lo que realmente se ve en pantalla.
+  useEffect(() => {
+    if (paused) {
+      cancelAnimation(wanderX);
+      cancelAnimation(wanderY);
+      wanderX.value = 0;
+      wanderY.value = 0;
+    } else {
+      runOnUI(startWander)();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paused]);
+
+  function triggerPickupVibration() {
+    if (vibrationEnabled) Vibration.vibrate(30);
+  }
 
   const pan = Gesture.Pan()
+    .activateAfterLongPress(BUBBLE_DRAG_LONG_PRESS_MS)
     .onBegin(() => {
       wanderX.value = withTiming(0, { duration: 150 });
       wanderY.value = withTiming(0, { duration: 150 });
       dragStartX.value = dragX.value;
       dragStartY.value = dragY.value;
       runOnJS(onInteractionStart)();
+      runOnJS(triggerPickupVibration)();
     })
     .onUpdate((event) => {
-      dragX.value = dragStartX.value + event.translationX;
-      dragY.value = dragStartY.value + event.translationY;
+      const rawX = dragStartX.value + event.translationX;
+      const rawY = dragStartY.value + event.translationY;
+      const minX = size / 2 - x;
+      const maxX = fieldWidth - size / 2 - x;
+      const minY = size / 2 - y;
+      const maxY = fieldHeight - size / 2 - y;
+      dragX.value = Math.max(minX, Math.min(maxX, rawX));
+      dragY.value = Math.max(minY, Math.min(maxY, rawY));
     })
     .onEnd(() => {
-      startWander();
+      dragX.value = withSpring(0);
+      dragY.value = withSpring(0);
+      if (!paused) startWander();
     });
 
   const tap = Gesture.Tap().onEnd(() => {
@@ -540,8 +716,20 @@ function FloatingBubble({
 
   return (
     <GestureDetector gesture={gesture}>
-      <View style={[styles.bubbleWrapper, { left: `${left}%`, top: `${top}%`, zIndex }]}>
-        <Animated.View style={[styles.bubble, animatedStyle, { backgroundColor: color, shadowColor: color }]}>
+      <View
+        style={[
+          styles.bubbleWrapper,
+          { left: x - size / 2, top: y - size / 2, width: size, height: size, zIndex },
+        ]}
+      >
+        <Animated.View
+          style={[
+            styles.bubble,
+            { borderRadius: size / 2 },
+            animatedStyle,
+            { backgroundColor: color, shadowColor: color },
+          ]}
+        >
           <ThemedText type="smallBold" style={styles.bubbleLabel} numberOfLines={1}>
             {label}
           </ThemedText>
@@ -552,21 +740,6 @@ function FloatingBubble({
       </View>
     </GestureDetector>
   );
-}
-
-function layoutForIndex(index: number, total: number): { left: number; top: number } {
-  const cols = Math.max(1, Math.ceil(Math.sqrt(total)));
-  const rows = Math.max(1, Math.ceil(total / cols));
-  const col = index % cols;
-  const row = Math.floor(index / cols);
-  const cellW = 90 / cols;
-  const cellH = 65 / rows;
-  const jitterSeed = Math.sin(index * 12.9898) * 43758.5453;
-  const jitter = jitterSeed - Math.floor(jitterSeed);
-  return {
-    left: 5 + col * cellW + cellW / 2 - 10 + jitter * 12,
-    top: 20 + row * cellH + cellH / 2 - 8 + (1 - jitter) * 10,
-  };
 }
 
 const styles = StyleSheet.create({
@@ -656,20 +829,21 @@ const styles = StyleSheet.create({
     gap: 4,
     padding: Spacing.one,
   },
+  sortRow: {
+    flexDirection: 'row',
+    gap: Spacing.two,
+    paddingHorizontal: Spacing.four,
+    paddingTop: Spacing.two,
+  },
   bubbleField: {
     flex: 1,
   },
   bubbleWrapper: {
     position: 'absolute',
-    width: 96,
-    height: 96,
-    marginLeft: -48,
-    marginTop: -48,
   },
   bubble: {
     width: '100%',
     height: '100%',
-    borderRadius: 48,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 8,

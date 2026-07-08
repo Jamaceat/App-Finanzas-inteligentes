@@ -1,8 +1,10 @@
-import { and, count, desc, eq, gte, isNotNull, isNull, lte } from 'drizzle-orm';
+import { and, count, desc, eq, gte, isNotNull, isNull, like, lte } from 'drizzle-orm';
 
 import { db } from '@/db/client';
 import { transactions } from '@/db/schema';
 import {
+  archiveRecurringRule,
+  createRecurringRule,
   updateNextDueDate,
   type CustomIntervalUnit,
   type RecurringFrequency,
@@ -11,13 +13,15 @@ import { advanceDate } from '@/db/queries/tanks';
 
 export type TransactionKind = (typeof transactions.$inferSelect)['kind'];
 
-export type TransactionFilter = { sectionId?: number; from?: Date; to?: Date };
+export type TransactionFilter = { sectionId?: number; from?: Date; to?: Date; search?: string };
 
 function transactionFilterConditions(filter?: TransactionFilter) {
+  const search = filter?.search?.trim();
   return [
     filter?.sectionId !== undefined ? eq(transactions.sectionId, filter.sectionId) : undefined,
     filter?.from ? gte(transactions.occurredAt, filter.from) : undefined,
     filter?.to ? lte(transactions.occurredAt, filter.to) : undefined,
+    search ? like(transactions.description, `%${search}%`) : undefined,
   ].filter((condition) => condition !== undefined);
 }
 
@@ -117,6 +121,62 @@ export async function allocateExpenseToIncomeTank(input: {
     input.expenseRuleId,
     advanceDate(input.nextDueDate, input.frequency, input.customIntervalValue, input.customIntervalUnit),
   );
+
+  return transaction;
+}
+
+export async function splitAndAllocateExpenseToIncomeTank(input: {
+  expenseRuleId: number;
+  incomeRuleId: number;
+  sectionId: number;
+  label: string;
+  allocatedAmount: number;
+  remainderAmount: number;
+  frequency: RecurringFrequency;
+  customIntervalValue?: number | null;
+  customIntervalUnit?: CustomIntervalUnit | null;
+  currentDueDate: Date;
+}) {
+  await archiveRecurringRule(input.expenseRuleId);
+
+  const [continuedRule] = await createRecurringRule({
+    sectionId: input.sectionId,
+    label: input.label,
+    kind: 'expense',
+    frequency: input.frequency,
+    customIntervalValue: input.customIntervalValue ?? null,
+    customIntervalUnit: input.customIntervalUnit ?? null,
+    isVariableAmount: false,
+    estimatedAmount: input.allocatedAmount,
+    nextDueDate: advanceDate(
+      input.currentDueDate,
+      input.frequency,
+      input.customIntervalValue,
+      input.customIntervalUnit,
+    ),
+  });
+
+  await createRecurringRule({
+    sectionId: input.sectionId,
+    label: input.label,
+    kind: 'expense',
+    frequency: input.frequency,
+    customIntervalValue: input.customIntervalValue ?? null,
+    customIntervalUnit: input.customIntervalUnit ?? null,
+    isVariableAmount: false,
+    estimatedAmount: input.remainderAmount,
+    nextDueDate: input.currentDueDate,
+  });
+
+  const [transaction] = await createTransaction({
+    sectionId: input.sectionId,
+    amount: input.allocatedAmount,
+    kind: 'expense',
+    description: input.label,
+    occurredAt: new Date(),
+    recurringRuleId: continuedRule.id,
+    allocatedIncomeRuleId: input.incomeRuleId,
+  });
 
   return transaction;
 }

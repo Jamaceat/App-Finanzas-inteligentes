@@ -21,6 +21,7 @@ import {
   updateCalendarSimulationOccurrences,
   updateRestrictPastStartDates,
   updateTransactionsPageSize,
+  updateAllowPartialTankAssignment,
   type TankMaxRenewalUnit,
 } from '@/db/queries/settings';
 
@@ -60,6 +61,7 @@ export default function SettingsScreen() {
               <TransactionsPageSizeForm value={row.transactionsPageSize} />
               <VibrationForm enabled={row.vibrationEnabled} />
               <RestrictPastDatesForm enabled={row.restrictPastStartDates} />
+              <AllowPartialTankAssignmentForm enabled={row.allowPartialTankAssignment} />
             </View>
           )}
         </ScrollView>
@@ -221,6 +223,28 @@ function RestrictPastDatesForm({ enabled }: { enabled: boolean }) {
           <ThemedText type="small" themeColor="textSecondary">
             Al crear o editar una regla recurrente, no se podrá elegir un punto de partida
             anterior a hoy.
+          </ThemedText>
+        </View>
+        <ThemedSwitch value={enabled} onValueChange={handleToggle} />
+      </View>
+    </ThemedView>
+  );
+}
+
+function AllowPartialTankAssignmentForm({ enabled }: { enabled: boolean }) {
+  async function handleToggle(newValue: boolean) {
+    await updateAllowPartialTankAssignment(newValue);
+  }
+
+  return (
+    <ThemedView type="backgroundElement" style={styles.form}>
+      <View style={styles.vibrationHeader}>
+        <View style={{ flex: 1, gap: Spacing.half }}>
+          <ThemedText type="smallBold">Asignación parcial de gastos</ThemedText>
+          <ThemedText type="small" themeColor="textSecondary">
+            Si el disponible del tanque no alcanza para todo el gasto, se asigna lo que haya y el
+            resto queda como una regla recurrente nueva para asignar después. Si está desactivado,
+            no se va a permitir soltar el gasto en un tanque sin fondos suficientes.
           </ThemedText>
         </View>
         <ThemedSwitch value={enabled} onValueChange={handleToggle} />

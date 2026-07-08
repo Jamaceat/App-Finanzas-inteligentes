@@ -32,3 +32,31 @@ export const DEFAULT_SIMULATION_OCCURRENCES = 24;
 export const EXPENSE_POINT_ENTRANCE_BASE_DELAY_MS = 80;
 export const EXPENSE_POINT_ENTRANCE_STAGGER_MS = 40;
 export const EXPENSE_POINT_ENTRANCE_DURATION_MS = 400;
+
+// Burbujas flotantes — escalabilidad y agrupación
+export const MAX_FLOATING_BUBBLES = 10; // <= esto: modo individual (comportamiento actual, sin clusters)
+export const MAX_BUBBLES_PER_CLUSTER = 8; // hijos visibles al expandir; si excede, se sub-agrupa por mes
+export const MAX_CLUSTERS_ON_SCREEN = 6; // > esto: el nivel superior pasa a buckets por mes
+export const CLUSTER_EXPAND_BACKDROP_OPACITY = 0.35; // oscurecido detrás de un cluster expandido
+
+// Burbujas flotantes — tamaño según monto
+export const BUBBLE_PILL_SCALE_MIN = 0.85; // factor de escala de la pill de asignar-gastos
+export const BUBBLE_PILL_SCALE_MAX = 1.2;
+export const CLUSTER_SCALE_MIN = 1.0; // factor de escala de la burbuja de cluster
+export const CLUSTER_SCALE_MAX = 1.3;
+export const CLUSTER_BASE_SIZE = 110; // diámetro base (px) de la burbuja de cluster
+export const POCKET_BUBBLE_SIZE_MIN = 72; // diámetro (px) de las burbujas del bolsillo
+export const POCKET_BUBBLE_SIZE_MAX = 112;
+export const POCKET_GRID_GAP = 14; // separación (px) entre celdas del grid del bolsillo
+export const POCKET_GRID_PADDING = 16; // padding (px) alrededor del grid scrolleable del bolsillo
+export const POCKET_WANDER_AMPLITUDE = 8; // amplitud (px) del vaivén en modo grid (celdas fijas, sin solapar)
+export const BUBBLE_SIZE_VARIABLE_RATIO = 0.4; // baseline de tamaño para montos variables/0
+
+// Burbujas flotantes — urgencia por vencimiento
+export const DUE_SOON_WINDOW_DAYS = 3; // ámbar si vence dentro de N días (o venció hace <= N)
+export const OVERDUE_SEVERE_DAYS = 3; // rojo si venció hace más de N días
+export const URGENCY_OVERDUE_COLOR = '#E5484D'; // Radix red9 — ya usado inline en la app
+export const URGENCY_DUE_SOON_COLOR = '#FFB224'; // Radix amber9 — misma familia que blue9/teal9/red9
+
+// Bolsillo — drag dentro del grid scrolleable (hold breve para levantar la burbuja)
+export const BUBBLE_DRAG_LONG_PRESS_MS = 200;

@@ -13,6 +13,7 @@ export type AppSettings = {
   calendarSimulationOccurrences: number;
   restrictPastStartDates: boolean;
   transactionsPageSize: number;
+  allowPartialTankAssignment: boolean;
 };
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -22,6 +23,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   calendarSimulationOccurrences: DEFAULT_SIMULATION_OCCURRENCES,
   restrictPastStartDates: false,
   transactionsPageSize: 20,
+  allowPartialTankAssignment: false,
 };
 
 export function watchAppSettingsRow() {
@@ -124,6 +126,24 @@ export async function updateTransactionsPageSize(pageSize: number): Promise<AppS
   const [updated] = await db
     .update(appSettings)
     .set({ transactionsPageSize: pageSize, updatedAt: new Date() })
+    .where(eq(appSettings.id, row.id))
+    .returning();
+  return updated;
+}
+
+export async function updateAllowPartialTankAssignment(enabled: boolean): Promise<AppSettings> {
+  const [row] = await watchAppSettingsRow();
+  if (!row) {
+    const [created] = await db
+      .insert(appSettings)
+      .values({ ...DEFAULT_SETTINGS, allowPartialTankAssignment: enabled })
+      .returning();
+    return created;
+  }
+
+  const [updated] = await db
+    .update(appSettings)
+    .set({ allowPartialTankAssignment: enabled, updatedAt: new Date() })
     .where(eq(appSettings.id, row.id))
     .returning();
   return updated;

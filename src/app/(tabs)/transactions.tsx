@@ -9,6 +9,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { TankSearchModal, type SearchTankItem } from '@/components/tank-search-modal';
 import { PaginationControls } from '@/components/pagination-controls';
+import { FilterChip } from '@/components/filter-chip';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import { FREE_TANK_COLOR, TANK_COLOR } from '@/constants/constants';
 import { useTheme } from '@/hooks/use-theme';
@@ -20,7 +21,7 @@ import {
   type TransactionKind,
 } from '@/db/queries/transactions';
 import { getOrCreateDefaultSection, listActiveSections } from '@/db/queries/sections';
-import { listActiveRecurringRules } from '@/db/queries/recurring-rules';
+import { listActiveRecurringRules, listAllRecurringRules } from '@/db/queries/recurring-rules';
 import { computeFreeCashTank, computeIncomeTanks, addInterval } from '@/db/queries/tanks';
 import { watchAppSettingsRow } from '@/db/queries/settings';
 
@@ -49,34 +50,41 @@ const TRANSACTIONS_PAGE_SIZE = 20;
 export default function TransactionsScreen() {
   const { kind: initialKind } = useLocalSearchParams<{ kind?: TransactionKind }>();
   const [sectionFilter, setSectionFilter] = useState<number | undefined>(undefined);
+  const [searchText, setSearchText] = useState('');
 
   const { data: sections } = useLiveQuery(listActiveSections());
   const { data: settingsRows } = useLiveQuery(watchAppSettingsRow());
   const settings = settingsRows[0] ?? { tankMaxRenewalValue: 30, tankMaxRenewalUnit: 'days' as const };
   const pageSize = settingsRows[0]?.transactionsPageSize ?? TRANSACTIONS_PAGE_SIZE;
   const { data: transactionCountRows } = useLiveQuery(
-    countTransactions({ sectionId: sectionFilter }),
-    [sectionFilter],
+    countTransactions({ sectionId: sectionFilter, search: searchText }),
+    [sectionFilter, searchText],
   );
   const pagination = usePagination({
     pageSize,
     totalCount: transactionCountRows[0]?.count ?? 0,
-    resetKey: `${sectionFilter ?? 'all'}:${pageSize}`,
+    resetKey: `${sectionFilter ?? 'all'}:${searchText}:${pageSize}`,
   });
   const { data: transactions } = useLiveQuery(
     listTransactions({
       sectionId: sectionFilter,
+      search: searchText,
       limit: pagination.pageSize,
       offset: pagination.offset,
     }),
-    [sectionFilter, pagination.offset, pagination.pageSize],
+    [sectionFilter, searchText, pagination.offset, pagination.pageSize],
   );
   const { data: rules } = useLiveQuery(listActiveRecurringRules());
+  const { data: allRules } = useLiveQuery(listAllRecurringRules());
   const { data: allTransactions } = useLiveQuery(listTransactions());
 
   const sectionById = useMemo(
     () => new Map(sections.map((section) => [section.id, section])),
     [sections],
+  );
+  const ruleById = useMemo(
+    () => new Map(allRules.map((rule) => [rule.id, rule])),
+    [allRules],
   );
 
   const incomeTanks = useMemo(
@@ -133,6 +141,8 @@ export default function TransactionsScreen() {
 
           <QuickAddForm sections={sections} tanks={tanks} initialKind={initialKind} />
 
+          <TransactionSearchBar value={searchText} onChangeText={setSearchText} />
+
           {sections.length > 0 && (
             <SectionFilterRow
               sections={sections}
@@ -162,8 +172,15 @@ export default function TransactionsScreen() {
                 ? transaction.allocatedIncomeRuleId
                 : transaction.recurringRuleId;
               const tankLabel = tankRuleId !== null ? tankLabelByRuleId.get(tankRuleId) : undefined;
+              const recurringRule =
+                transaction.recurringRuleId !== null ? ruleById.get(transaction.recurringRuleId) : undefined;
+              const rowBackground = recurringRule
+                ? recurringRule.isVariableAmount
+                  ? 'backgroundRecurringVariable'
+                  : 'backgroundRecurringFixed'
+                : 'backgroundElement';
               return (
-                <ThemedView key={transaction.id} type="backgroundElement" style={styles.row}>
+                <ThemedView key={transaction.id} type={rowBackground} style={styles.row}>
                   <View style={styles.rowMain}>
                     <ThemedText type="smallBold">{section?.name ?? 'Sección'}</ThemedText>
                     {transaction.description ? (
@@ -202,6 +219,34 @@ export default function TransactionsScreen() {
   );
 }
 
+function TransactionSearchBar({
+  value,
+  onChangeText,
+}: {
+  value: string;
+  onChangeText: (text: string) => void;
+}) {
+  const theme = useTheme();
+  return (
+    <ThemedView type="backgroundElement" style={styles.searchBar}>
+      <SymbolView name={symbol('magnifyingglass', 'search')} tintColor={theme.textSecondary} size={18} />
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        placeholder="Buscar por descripción..."
+        placeholderTextColor={theme.textSecondary}
+        style={[styles.searchInput, { color: theme.text }]}
+        clearButtonMode="while-editing"
+      />
+      {value.length > 0 && (
+        <Pressable onPress={() => onChangeText('')} style={({ pressed }) => pressed && styles.pressed}>
+          <SymbolView name={symbol('xmark.circle.fill', 'cancel')} tintColor={theme.textSecondary} size={16} />
+        </Pressable>
+      )}
+    </ThemedView>
+  );
+}
+
 function SectionFilterRow({
   sections,
   selectedId,
@@ -223,26 +268,6 @@ function SectionFilterRow({
         />
       ))}
     </View>
-  );
-}
-
-function FilterChip({
-  label,
-  selected,
-  onPress,
-}: {
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable onPress={onPress} style={({ pressed }) => pressed && styles.pressed}>
-      <ThemedView
-        type={selected ? 'backgroundSelected' : 'backgroundElement'}
-        style={styles.chip}>
-        <ThemedText type="small">{label}</ThemedText>
-      </ThemedView>
-    </Pressable>
   );
 }
 
@@ -442,10 +467,18 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: Spacing.one,
   },
-  chip: {
-    paddingVertical: Spacing.one,
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
     paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
     borderRadius: Spacing.three,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 15,
+    padding: 0,
   },
   tankPicker: {
     flexDirection: 'row',

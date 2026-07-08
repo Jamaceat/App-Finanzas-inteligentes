@@ -25,8 +25,12 @@ import {
   EXPENSE_POINT_ENTRANCE_BASE_DELAY_MS,
   EXPENSE_POINT_ENTRANCE_STAGGER_MS,
   EXPENSE_POINT_ENTRANCE_DURATION_MS,
+  URGENCY_OVERDUE_COLOR,
+  URGENCY_DUE_SOON_COLOR,
 } from '@/constants/constants';
 import { useTheme } from '@/hooks/use-theme';
+import type { Urgency } from '@/lib/bubble-visuals';
+import { formatCurrency } from '@/lib/format';
 
 function symbol(ios: SFSymbol, android: AndroidSymbol) {
   return { ios, android, web: android };
@@ -36,6 +40,8 @@ export type MiniTankTarget = {
   ruleId: number;
   label: string;
   color: string;
+  level: number;
+  capacity: number;
 };
 
 type Rect = { x: number; y: number; width: number; height: number };
@@ -69,6 +75,10 @@ export function FloatingExpensePoint({
   onPositionChange,
   zIndex,
   onInteractionStart,
+  sizeScale = 1,
+  urgency = 'neutral',
+  forceDimmed = false,
+  allowPartialAssignment,
 }: {
   pointKey: string;
   label: string;
@@ -88,11 +98,15 @@ export function FloatingExpensePoint({
   initialY: number;
   focusedPointKey: string | null;
   onSetFocused: (key: string | null) => void;
-  onAssign: (ruleId: number) => void;
+  onAssign: (ruleId: number, allocatedAmount: number) => void;
   vibrationEnabled: boolean;
   onPositionChange: (key: string, x: number, y: number) => void;
   zIndex: number;
   onInteractionStart: () => void;
+  sizeScale?: number;
+  urgency?: Urgency;
+  forceDimmed?: boolean;
+  allowPartialAssignment: boolean;
 }) {
   const theme = useTheme();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
@@ -101,7 +115,10 @@ export function FloatingExpensePoint({
 
   const isFocused = focusedPointKey === pointKey;
   const anyFocused = focusedPointKey !== null;
-  const isDimmed = anyFocused && !isFocused;
+  // Un gasto "suelto" (sección con un solo ítem) puede quedar en la raíz del
+  // árbol de clusters junto a otros clusters: forceDimmed lo atenúa cuando un
+  // cluster hermano está expandido, igual que si estuviera enfocado otro punto.
+  const isDimmed = (anyFocused && !isFocused) || forceDimmed;
 
   const [assigningTankId, setAssigningTankId] = useState<number | null>(null);
 
@@ -144,11 +161,11 @@ export function FloatingExpensePoint({
         duration: EXPENSE_POINT_ENTRANCE_DURATION_MS,
         easing: Easing.out(Easing.cubic),
       };
-      pillScale.value = withDelay(delay, withTiming(1, entranceTiming));
+      pillScale.value = withDelay(delay, withTiming(sizeScale, entranceTiming));
       translateX.value = withDelay(delay, withTiming(originX - initialX, entranceTiming));
       translateY.value = withDelay(delay, withTiming(originY - initialY, entranceTiming));
     }
-  }, [originX, originY, initialX, initialY, translateX, translateY, isDragging, isFreeDragging, pillScale, label]);
+  }, [originX, originY, initialX, initialY, translateX, translateY, isDragging, isFreeDragging, pillScale, label, sizeScale]);
 
   const startWander = () => {
     'worklet';
@@ -172,16 +189,17 @@ export function FloatingExpensePoint({
     );
   };
 
+  // El vaivén se detiene tanto si el punto está enfocado como si está atenuado
+  // (otro punto enfocado, o un cluster hermano expandido): los puntos que no
+  // se ven interactuar no necesitan gastar frames animando.
   useEffect(() => {
-    if (isFocused) {
+    if (isFocused || isDimmed) {
       wanderX.value = withTiming(0, { duration: 150 });
       wanderY.value = withTiming(0, { duration: 150 });
-    } else {
-      if (!isDragging.value && !isFreeDragging.value) {
-        runOnUI(startWander)();
-      }
+    } else if (!isDragging.value && !isFreeDragging.value) {
+      runOnUI(startWander)();
     }
-  }, [isFocused, wanderX, wanderY]);
+  }, [isFocused, isDimmed, wanderX, wanderY]);
 
   const skipFocusMountRef = useRef(true);
   // Handle pill scale spring on focus (accelerated)
@@ -191,9 +209,9 @@ export function FloatingExpensePoint({
       return;
     }
     if (assigningTankId === null) {
-      pillScale.value = withSpring(isFocused ? 1.15 : 1, { damping: 15, stiffness: 180 });
+      pillScale.value = withSpring(isFocused ? 1.15 : sizeScale, { damping: 15, stiffness: 180 });
     }
-  }, [isFocused, assigningTankId, pillScale]);
+  }, [isFocused, assigningTankId, pillScale, sizeScale]);
 
   const skipCenterFlightMountRef = useRef(true);
   // Center flight trigger (accelerated)
@@ -220,7 +238,41 @@ export function FloatingExpensePoint({
     }
   }
 
-  function handleAssign(target: number) {
+  function triggerRejectVibration() {
+    if (vibrationEnabled) {
+      Vibration.vibrate([0, 40, 40, 40]);
+    }
+  }
+
+  function springBackToCenter() {
+    translateX.value = withSpring(centerX - initialX, { damping: 18, stiffness: 180 });
+    translateY.value = withSpring(centerY - initialY, { damping: 18, stiffness: 180 });
+    detailsVisible.value = withTiming(1, { duration: 250 });
+  }
+
+  // Decide si el gasto entra completo, parcial (si el disponible no alcanza y
+  // la config lo permite) o se rechaza, y dispara la animación correspondiente.
+  // Usado tanto por el tap directo en un mini-tanque como (via runOnJS) por el
+  // gesto de arrastre, para que ambos caminos apliquen la misma regla.
+  function attemptAssign(target: number) {
+    if (assigningTankId !== null) return;
+
+    const tank = tanks.find((t) => t.ruleId === target);
+    const tankLevel = tank?.level ?? 0;
+    const fitsFully = isVariable || rawAmount <= tankLevel;
+    const fitsPartially = !fitsFully && allowPartialAssignment && tankLevel > 0;
+
+    if (fitsFully) {
+      handleAssign(target, rawAmount);
+    } else if (fitsPartially) {
+      handleAssign(target, tankLevel);
+    } else {
+      triggerRejectVibration();
+      springBackToCenter();
+    }
+  }
+
+  function handleAssign(target: number, allocatedAmount: number) {
     if (assigningTankId !== null) return;
 
     if (vibrationEnabled) {
@@ -255,7 +307,7 @@ export function FloatingExpensePoint({
     pillScale.value = withSpring(0, { damping: 18, stiffness: 100 });
 
     setTimeout(() => {
-      onAssign(target);
+      onAssign(target, allocatedAmount);
       onSetFocused(null);
     }, 320);
   }
@@ -360,9 +412,28 @@ export function FloatingExpensePoint({
       
       if (isFocused) {
         const target = hoveredTankId.value;
-        
+
         if (target !== null) {
-          runOnJS(handleAssign)(target);
+          let tankLevel = 0;
+          for (let i = 0; i < tanks.length; i++) {
+            if (tanks[i].ruleId === target) {
+              tankLevel = tanks[i].level;
+              break;
+            }
+          }
+          const fitsFully = isVariable || rawAmount <= tankLevel;
+          const fitsPartially = !fitsFully && allowPartialAssignment && tankLevel > 0;
+
+          if (fitsFully) {
+            runOnJS(handleAssign)(target, rawAmount);
+          } else if (fitsPartially) {
+            runOnJS(handleAssign)(target, tankLevel);
+          } else {
+            runOnJS(triggerRejectVibration)();
+            translateX.value = withSpring(centerX - initialX, { damping: 18, stiffness: 180 });
+            translateY.value = withSpring(centerY - initialY, { damping: 18, stiffness: 180 });
+            detailsVisible.value = withTiming(1, { duration: 250 });
+          }
         } else {
           translateX.value = withSpring(centerX - initialX, { damping: 18, stiffness: 180 });
           translateY.value = withSpring(centerY - initialY, { damping: 18, stiffness: 180 });
@@ -414,6 +485,8 @@ export function FloatingExpensePoint({
 
   const sectionIconName = sectionIcon || 'tag.fill';
   const displayColor = sectionColor || color;
+  const urgencyColor =
+    urgency === 'overdue' ? URGENCY_OVERDUE_COLOR : urgency === 'dueSoon' ? URGENCY_DUE_SOON_COLOR : null;
 
   return (
     <View
@@ -444,8 +517,11 @@ export function FloatingExpensePoint({
                 detailsVisible={detailsVisible}
                 assigningTankId={assigningTankId}
                 hoveredTankId={hoveredTankId}
+                rawAmount={rawAmount}
+                isVariable={isVariable}
+                allowPartialAssignment={allowPartialAssignment}
                 onPress={() => {
-                  handleAssign(tank.ruleId);
+                  attemptAssign(tank.ruleId);
                 }}
               />
             );
@@ -455,13 +531,14 @@ export function FloatingExpensePoint({
 
       {/* The main pill/bubble */}
       <GestureDetector gesture={gesture}>
-        <Animated.View 
+        <Animated.View
           style={[
-            styles.point, 
-            { 
+            styles.point,
+            {
               backgroundColor: displayColor,
               shadowColor: displayColor,
-            }, 
+            },
+            urgencyColor ? { borderColor: urgencyColor, borderWidth: 2.5 } : null,
             pointStyle
           ]}
         >
@@ -543,6 +620,9 @@ function MiniTankTargetView({
   onPress,
   assigningTankId,
   hoveredTankId,
+  rawAmount,
+  isVariable,
+  allowPartialAssignment,
 }: {
   tank: MiniTankTarget;
   angle: number;
@@ -554,7 +634,11 @@ function MiniTankTargetView({
   onPress: () => void;
   assigningTankId: number | null;
   hoveredTankId: SharedValue<number | null>;
+  rawAmount: number;
+  isVariable: boolean;
+  allowPartialAssignment: boolean;
 }) {
+  const theme = useTheme();
   const scale = useSharedValue(0.5);
   const opacity = useSharedValue(0);
 
@@ -619,8 +703,30 @@ function MiniTankTargetView({
     };
   });
 
+  const previewStyle = useAnimatedStyle(() => {
+    const isHovered = hoveredTankId.value === tank.ruleId;
+    return {
+      opacity: withTiming(isHovered ? 1 : 0, { duration: 120 }),
+      transform: [{ scale: withTiming(isHovered ? 1 : 0.9, { duration: 120 }) }],
+    };
+  });
+
+  // Montos estáticos por render (no dependen del gesto en curso): se
+  // recalculan cada vez que cambian props, la visibilidad del card la maneja
+  // solo previewStyle (leyendo hoveredTankId en el hilo de UI).
+  const capacity = Math.max(tank.capacity, 1);
+  const level = Math.max(tank.level, 0);
+  const spentPct = Math.max(0, Math.min(100, ((capacity - level) / capacity) * 100));
+  const insufficient = !isVariable && rawAmount > level;
+  const isPartial = insufficient && allowPartialAssignment && level > 0;
+  const willBeBlocked = insufficient && !isPartial;
+  const assignAmount = willBeBlocked ? 0 : insufficient ? level : rawAmount;
+  const remaining = Math.max(0, level - assignAmount);
+  const remainingPct = Math.max(0, Math.min(100, (remaining / capacity) * 100));
+  const consumePct = Math.max(0, Math.min(100, (assignAmount / capacity) * 100));
+
   return (
-    <AnimatedPressable 
+    <AnimatedPressable
       onPress={onPress}
       style={[
         styles.miniTankWrapper,
@@ -648,6 +754,83 @@ function MiniTankTargetView({
           {tank.label}
         </ThemedText>
       </Animated.View>
+
+      {!isVariable && (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.tankPreviewCard,
+            previewStyle,
+            {
+              backgroundColor: theme.backgroundElement,
+              borderColor: willBeBlocked ? URGENCY_OVERDUE_COLOR : theme.backgroundSelected,
+            },
+          ]}
+        >
+          <ThemedText type="smallBold" numberOfLines={1} style={styles.tankPreviewTitle}>
+            {tank.label}
+          </ThemedText>
+          <View style={styles.tankPreviewBarTrack}>
+            <View
+              style={[
+                styles.tankPreviewBarSegment,
+                { flexBasis: `${spentPct}%`, backgroundColor: theme.backgroundSelected },
+              ]}
+            />
+            {willBeBlocked ? (
+              <View
+                style={[
+                  styles.tankPreviewBarSegment,
+                  { flexBasis: `${100 - spentPct}%`, backgroundColor: TANK_COLOR },
+                ]}
+              />
+            ) : (
+              <>
+                <View
+                  style={[
+                    styles.tankPreviewBarSegment,
+                    { flexBasis: `${remainingPct}%`, backgroundColor: TANK_COLOR },
+                  ]}
+                />
+                <View
+                  style={[
+                    styles.tankPreviewBarSegment,
+                    { flexBasis: `${consumePct}%`, backgroundColor: URGENCY_OVERDUE_COLOR },
+                  ]}
+                />
+              </>
+            )}
+          </View>
+          {willBeBlocked ? (
+            <>
+              <ThemedText type="code" style={[styles.tankPreviewWarning, { color: URGENCY_OVERDUE_COLOR }]}>
+                No alcanza el disponible
+              </ThemedText>
+              <ThemedText type="small" themeColor="textSecondary" style={styles.tankPreviewLine}>
+                {`Disponible: ${formatCurrency(level)} · Necesita: ${formatCurrency(rawAmount)}`}
+              </ThemedText>
+            </>
+          ) : isPartial ? (
+            <>
+              <ThemedText type="small" style={styles.tankPreviewLine}>
+                {`Se asigna ${formatCurrency(assignAmount)} acá`}
+              </ThemedText>
+              <ThemedText type="small" themeColor="textSecondary" style={styles.tankPreviewLine}>
+                {`Resto: ${formatCurrency(rawAmount - assignAmount)} queda como gasto recurrente nuevo`}
+              </ThemedText>
+            </>
+          ) : (
+            <>
+              <ThemedText type="small" style={styles.tankPreviewLine}>
+                {`Sacarías: ${formatCurrency(assignAmount)}`}
+              </ThemedText>
+              <ThemedText type="small" themeColor="textSecondary" style={styles.tankPreviewLine}>
+                {`Quedaría: ${formatCurrency(remaining)} (${remainingPct.toFixed(0)}%)`}
+              </ThemedText>
+            </>
+          )}
+        </Animated.View>
+      )}
     </AnimatedPressable>
   );
 }
@@ -714,6 +897,41 @@ const styles = StyleSheet.create({
     borderRadius: TANK_SIZE / 2,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  tankPreviewCard: {
+    position: 'absolute',
+    bottom: TANK_SIZE + 10,
+    left: TANK_SIZE / 2 - 75,
+    width: 150,
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: Spacing.two,
+    gap: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  tankPreviewTitle: {
+    fontSize: 12,
+  },
+  tankPreviewBarTrack: {
+    flexDirection: 'row',
+    height: 6,
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  tankPreviewBarSegment: {
+    height: '100%',
+  },
+  tankPreviewLine: {
+    fontSize: 11,
+    lineHeight: 14,
+  },
+  tankPreviewWarning: {
+    fontSize: 10,
+    fontWeight: '700',
   },
   miniTankLabel: {
     color: '#fff',

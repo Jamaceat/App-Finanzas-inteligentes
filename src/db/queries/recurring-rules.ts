@@ -1,4 +1,4 @@
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, count, eq, isNull, like } from 'drizzle-orm';
 
 import { db } from '@/db/client';
 import { recurringRules } from '@/db/schema';
@@ -9,8 +9,41 @@ export type CustomIntervalUnit = NonNullable<
   (typeof recurringRules.$inferSelect)['customIntervalUnit']
 >;
 
-export function listActiveRecurringRules() {
-  return db.select().from(recurringRules).where(isNull(recurringRules.archivedAt));
+export type RecurringRuleFilter = { kind?: RecurringKind; search?: string };
+
+function recurringRuleFilterConditions(filter?: RecurringRuleFilter) {
+  const search = filter?.search?.trim();
+  return [
+    isNull(recurringRules.archivedAt),
+    filter?.kind !== undefined ? eq(recurringRules.kind, filter.kind) : undefined,
+    search ? like(recurringRules.label, `%${search}%`) : undefined,
+  ].filter((condition) => condition !== undefined);
+}
+
+export function listAllRecurringRules() {
+  return db.select().from(recurringRules);
+}
+
+export function listActiveRecurringRules(
+  filter?: RecurringRuleFilter & { limit?: number; offset?: number },
+) {
+  const query = db
+    .select()
+    .from(recurringRules)
+    .where(and(...recurringRuleFilterConditions(filter)));
+
+  if (filter?.limit !== undefined) {
+    return query.limit(filter.limit).offset(filter.offset ?? 0);
+  }
+
+  return query;
+}
+
+export function countActiveRecurringRules(filter?: RecurringRuleFilter) {
+  return db
+    .select({ count: count() })
+    .from(recurringRules)
+    .where(and(...recurringRuleFilterConditions(filter)));
 }
 
 export function createRecurringRule(input: {

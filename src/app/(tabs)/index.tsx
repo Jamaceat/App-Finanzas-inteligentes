@@ -25,6 +25,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { TankSearchModal, type SearchTankItem } from '@/components/tank-search-modal';
 import { Tank } from '@/components/tank';
+import { FilterChip } from '@/components/filter-chip';
 
 function symbol(ios: SFSymbol, android: AndroidSymbol) {
   return { ios, android, web: android };
@@ -61,29 +62,7 @@ import {
   type IncomeTank,
   type PendingExpense,
 } from '@/db/queries/tanks';
-
-const currencyFormatter = new Intl.NumberFormat('es-AR', {
-  style: 'currency',
-  currency: 'ARS',
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
-function formatCurrency(amount: number): string {
-  return currencyFormatter.format(amount);
-}
-
-function formatCompactCurrency(amount: number): string {
-  if (amount >= 1_000_000) {
-    const val = amount / 1_000_000;
-    return `$${val.toFixed(val % 1 === 0 ? 0 : 1)}M`;
-  }
-  if (amount >= 1_000) {
-    const val = amount / 1_000;
-    return `$${val.toFixed(val % 1 === 0 ? 0 : 1)}K`;
-  }
-  return formatCurrency(amount);
-}
+import { formatCompactCurrency, formatCurrency } from '@/lib/format';
 
 export default function HomeScreen() {
   const { data: rules } = useLiveQuery(listActiveRecurringRules());
@@ -572,31 +551,6 @@ export default function HomeScreen() {
   );
 }
 
-function FilterChip({
-  label,
-  color,
-  selected,
-  onPress,
-}: {
-  label: string;
-  color?: string;
-  selected: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable onPress={onPress}>
-      <ThemedView
-        type={selected ? 'backgroundSelected' : 'backgroundElement'}
-        style={styles.filterChip}>
-        {color && <View style={[styles.filterChipDot, { backgroundColor: color }]} />}
-        <ThemedText type="small" themeColor={selected ? 'text' : 'textSecondary'}>
-          {label}
-        </ThemedText>
-      </ThemedView>
-    </Pressable>
-  );
-}
-
 function TankCarousel({
   children,
   scrollRef,
@@ -940,19 +894,6 @@ const styles = StyleSheet.create({
   },
   filterScrollView: {
     flexGrow: 0,
-  },
-  filterChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.one,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
-    borderRadius: Spacing.five,
-  },
-  filterChipDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
   },
   carouselContainer: {
     position: 'relative',
