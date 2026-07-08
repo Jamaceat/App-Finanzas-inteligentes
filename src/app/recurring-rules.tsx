@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { DEFAULT_SIMULATION_OCCURRENCES } from '@/constants/constants';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import {
@@ -18,6 +19,7 @@ import {
   type RecurringKind,
 } from '@/db/queries/recurring-rules';
 import { getOrCreateDefaultSection, listActiveSections } from '@/db/queries/sections';
+import { watchAppSettingsRow } from '@/db/queries/settings';
 import { advanceDate } from '@/db/queries/tanks';
 import { cancelRuleReminder } from '@/lib/notifications';
 
@@ -76,9 +78,12 @@ export default function RecurringRulesScreen() {
   const params = useLocalSearchParams<{ kind?: RecurringKind; variable?: string }>();
   const { data: rules } = useLiveQuery(listActiveRecurringRules());
   const { data: sections } = useLiveQuery(listActiveSections());
+  const { data: settingsRows } = useLiveQuery(watchAppSettingsRow());
+  const settings = settingsRows?.[0];
   const [editingId, setEditingId] = useState<number | null>(null);
 
   const editingRule = rules.find((rule) => rule.id === editingId);
+  const simulationOccurrences = settings?.calendarSimulationOccurrences ?? DEFAULT_SIMULATION_OCCURRENCES;
 
   return (
     <ThemedView style={styles.container}>
@@ -98,6 +103,7 @@ export default function RecurringRulesScreen() {
             sections={sections}
             initialKind={params.kind}
             initialVariable={params.variable === '1'}
+            simulationOccurrences={simulationOccurrences}
             onDone={() => setEditingId(null)}
           />
 
@@ -175,12 +181,14 @@ function RuleForm({
   sections,
   initialKind,
   initialVariable,
+  simulationOccurrences,
   onDone,
 }: {
   editing?: Rule;
   sections: { id: number; name: string }[];
   initialKind?: RecurringKind;
   initialVariable?: boolean;
+  simulationOccurrences: number;
   onDone: () => void;
 }) {
   const theme = useTheme();
@@ -206,7 +214,13 @@ function RuleForm({
   const formattedAmount = formatCurrencyInput(amountDigits);
   const customValueNumber = Math.max(1, Number(customValue) || 1);
 
-  const upcomingDates = simulateOccurrences(startDate, frequency, customValueNumber, customUnit);
+  const upcomingDates = simulateOccurrences(
+    startDate,
+    frequency,
+    customValueNumber,
+    customUnit,
+    simulationOccurrences,
+  );
 
   function handleAmountChange(text: string) {
     const digitsOnly = text.replace(/\D/g, '');
@@ -393,7 +407,7 @@ function simulateOccurrences(
   frequency: RecurringFrequency,
   customIntervalValue: number,
   customIntervalUnit: CustomIntervalUnit,
-  count = 8,
+  count: number,
 ): Date[] {
   const dates: Date[] = [];
   let current = new Date(start);
@@ -427,6 +441,7 @@ function MiniCalendar({
 }) {
   const theme = useTheme();
   const [viewDate, setViewDate] = useState(new Date(value.getFullYear(), value.getMonth(), 1));
+  const [containerWidth, setContainerWidth] = useState(0);
 
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
@@ -445,32 +460,59 @@ function MiniCalendar({
     setViewDate(new Date(year, month + delta, 1));
   }
 
+  const gridWidth = containerWidth > 0 ? Math.round(containerWidth - Spacing.two * 2) : 0;
+  const cellWidth = gridWidth > 0 ? Math.floor(gridWidth / 7) : undefined;
+  const daySize = cellWidth ? Math.floor(cellWidth * 0.8) : undefined;
+  const dayRadius = daySize ? Math.floor(daySize / 2) : undefined;
+
+  const cellStyle = cellWidth ? { width: cellWidth, height: cellWidth } : styles.calendarCell;
+  const dayStyle = daySize && dayRadius
+    ? {
+        width: daySize,
+        height: daySize,
+        borderRadius: dayRadius,
+        overflow: 'hidden' as const,
+      }
+    : styles.calendarDay;
+
   return (
-    <ThemedView type="background" style={styles.calendar}>
+    <ThemedView
+      type="background"
+      style={styles.calendar}
+      onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}
+    >
       <View style={styles.calendarHeader}>
-        <Pressable onPress={() => goToMonth(-1)} style={({ pressed }) => pressed && styles.pressed}>
-          <ThemedText type="smallBold">‹</ThemedText>
+        <Pressable
+          onPress={() => goToMonth(-1)}
+          style={({ pressed }) => [styles.monthNavButton, pressed && styles.pressed]}
+        >
+          <ThemedText style={styles.monthNavText}>‹</ThemedText>
         </Pressable>
-        <ThemedText type="small" style={styles.calendarMonthLabel}>
+        <ThemedText style={styles.calendarMonthLabel}>
           {monthFormatter.format(viewDate)}
         </ThemedText>
-        <Pressable onPress={() => goToMonth(1)} style={({ pressed }) => pressed && styles.pressed}>
-          <ThemedText type="smallBold">›</ThemedText>
+        <Pressable
+          onPress={() => goToMonth(1)}
+          style={({ pressed }) => [styles.monthNavButton, pressed && styles.pressed]}
+        >
+          <ThemedText style={styles.monthNavText}>›</ThemedText>
         </Pressable>
       </View>
 
       <View style={styles.calendarWeekRow}>
         {WEEKDAY_LABELS.map((label, index) => (
-          <ThemedText key={index} type="small" themeColor="textSecondary" style={styles.calendarCell}>
-            {label}
-          </ThemedText>
+          <View key={index} style={[styles.calendarCell, cellStyle]}>
+            <ThemedText type="small" themeColor="textSecondary">
+              {label}
+            </ThemedText>
+          </View>
         ))}
       </View>
 
       <View style={styles.calendarGrid}>
         {cells.map((date, index) => {
           if (!date) {
-            return <View key={index} style={styles.calendarCell} />;
+            return <View key={index} style={[styles.calendarCell, cellStyle]} />;
           }
 
           const isSelected = isSameDay(date, value);
@@ -480,13 +522,19 @@ function MiniCalendar({
             <Pressable
               key={index}
               onPress={() => onChange(date)}
-              style={({ pressed }) => [styles.calendarCell, pressed && styles.pressed]}>
+              style={({ pressed }) => [styles.calendarCell, cellStyle, pressed && styles.pressed]}
+            >
               <View
                 style={[
                   styles.calendarDay,
-                  isSelected && { backgroundColor: theme.backgroundSelected },
-                  isHighlighted && { borderColor: highlightColor, borderWidth: 1.5 },
-                ]}>
+                  dayStyle,
+                  {
+                    backgroundColor: isSelected ? theme.backgroundSelected : 'transparent',
+                    borderColor: isHighlighted ? highlightColor : 'transparent',
+                    borderWidth: 1.5,
+                  },
+                ]}
+              >
                 <ThemedText type="small">{date.getDate()}</ThemedText>
               </View>
             </Pressable>
@@ -608,9 +656,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: Spacing.one,
+    paddingVertical: Spacing.two,
   },
   calendarMonthLabel: {
     textTransform: 'capitalize',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  monthNavButton: {
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  monthNavText: {
+    fontSize: 24,
+    lineHeight: 24,
+    fontWeight: 'bold',
   },
   calendarWeekRow: {
     flexDirection: 'row',
@@ -631,5 +693,6 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
 });

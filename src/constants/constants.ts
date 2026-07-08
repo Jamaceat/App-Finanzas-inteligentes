@@ -24,3 +24,6 @@ export const SEARCH_PRESS_RELEASE_DURATION_MS = 150;
 
 // Home — animación de llenado del tanque
 export const TANK_FILL_ANIMATION_DURATION_MS = 400;
+
+// Calendario — cantidad de ocurrencias por defecto a simular en la regla recurrente
+export const DEFAULT_SIMULATION_OCCURRENCES = 24;

@@ -197,85 +197,90 @@ export default function AsignarGastosScreen() {
   }, [points, customPositions, seededPositions, width, height]);
 
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={[styles.safeArea, { opacity: focusedPointKey !== null ? 0.15 : 1 }]} edges={['top']}>
-        <ThemedText type="title" style={styles.title}>
-          Asignar gastos
-        </ThemedText>
-        <ThemedText type="small" themeColor="textSecondary" style={styles.subtitle}>
-          Tocá un gasto y arrastralo hasta el tanque del que sale.
-        </ThemedText>
-
-        {points.length === 0 && (
-          <ThemedText themeColor="textSecondary" style={styles.emptyText}>
-            No hay gastos sin asignar.
+    <GestureHandlerRootView style={styles.gestureRoot}>
+      <ThemedView style={styles.container}>
+        <SafeAreaView style={[styles.safeArea, { opacity: focusedPointKey !== null ? 0.15 : 1 }]} edges={['top']}>
+          <ThemedText type="title" style={styles.title}>
+            Asignar gastos
           </ThemedText>
-        )}
-        {points.length > 0 && tanks.length === 0 && (
-          <ThemedText themeColor="textSecondary" style={styles.emptyText}>
-            Creá una regla de ingreso recurrente en Secciones para poder asignar estos gastos.
+          <ThemedText type="small" themeColor="textSecondary" style={styles.subtitle}>
+            Tocá un gasto y arrastralo hasta el tanque del que sale.
           </ThemedText>
-        )}
-      </SafeAreaView>
 
-      {focusedPointKey !== null && (
-        <Pressable
-          style={[
-            StyleSheet.absoluteFill,
-            { backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 10 }
-          ]}
-          onPress={() => setFocusedPointKey(null)}
+          {points.length === 0 && (
+            <ThemedText themeColor="textSecondary" style={styles.emptyText}>
+              No hay gastos sin asignar.
+            </ThemedText>
+          )}
+          {points.length > 0 && tanks.length === 0 && (
+            <ThemedText themeColor="textSecondary" style={styles.emptyText}>
+              Creá una regla de ingreso recurrente en Secciones para poder asignar estos gastos.
+            </ThemedText>
+          )}
+        </SafeAreaView>
+
+        {focusedPointKey !== null && (
+          <Pressable
+            style={[
+              StyleSheet.absoluteFill,
+              { backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 10 }
+            ]}
+            onPress={() => setFocusedPointKey(null)}
+          />
+        )}
+
+        <View style={styles.pointsLayer} pointerEvents="box-none">
+          {points.map((point) => {
+            const origin = positions.get(point.key);
+            const initial = seededPositions.get(point.key);
+            if (!origin || !initial) return null;
+            return (
+              <FloatingExpensePoint
+                key={point.key}
+                pointKey={point.key}
+                label={point.label}
+                amountLabel={point.amountLabel}
+                fullAmountLabel={point.fullAmountLabel}
+                sectionColor={point.sectionColor}
+                sectionIcon={point.sectionIcon}
+                isVariable={point.isVariable}
+                rawAmount={point.rawAmount}
+                frequency={point.frequency}
+                nextDueDate={point.nextDueDate}
+                color={EXPENSE_POINT_COLOR}
+                tanks={tanks}
+                originX={origin.x}
+                originY={origin.y}
+                initialX={initial.x}
+                initialY={initial.y}
+                focusedPointKey={focusedPointKey}
+                onSetFocused={setFocusedPointKey}
+                onAssign={point.onAssign}
+                vibrationEnabled={vibrationEnabled}
+                onPositionChange={(key: string, x: number, y: number) => {
+                  setCustomPositions((prev) => ({ ...prev, [key]: { x, y } }));
+                }}
+              />
+            );
+          })}
+        </View>
+
+        <PocketWidget
+          tanks={tanks}
+          expenses={pocketExpenses}
+          onUnassign={(expenseId) => unassignTransactionFromIncomeTank(expenseId)}
+          vibrationEnabled={vibrationEnabled}
+          onCollapsedChange={setIsWidgetCollapsed}
         />
-      )}
-
-      <View style={styles.pointsLayer} pointerEvents="box-none">
-        {points.map((point) => {
-          const origin = positions.get(point.key);
-          const initial = seededPositions.get(point.key);
-          if (!origin || !initial) return null;
-          return (
-            <FloatingExpensePoint
-              key={point.key}
-              pointKey={point.key}
-              label={point.label}
-              amountLabel={point.amountLabel}
-              fullAmountLabel={point.fullAmountLabel}
-              sectionColor={point.sectionColor}
-              sectionIcon={point.sectionIcon}
-              isVariable={point.isVariable}
-              rawAmount={point.rawAmount}
-              frequency={point.frequency}
-              nextDueDate={point.nextDueDate}
-              color={EXPENSE_POINT_COLOR}
-              tanks={tanks}
-              originX={origin.x}
-              originY={origin.y}
-              initialX={initial.x}
-              initialY={initial.y}
-              focusedPointKey={focusedPointKey}
-              onSetFocused={setFocusedPointKey}
-              onAssign={point.onAssign}
-              vibrationEnabled={vibrationEnabled}
-              onPositionChange={(key: string, x: number, y: number) => {
-                setCustomPositions((prev) => ({ ...prev, [key]: { x, y } }));
-              }}
-            />
-          );
-        })}
-      </View>
-
-      <PocketWidget
-        tanks={tanks}
-        expenses={pocketExpenses}
-        onUnassign={(expenseId) => unassignTransactionFromIncomeTank(expenseId)}
-        vibrationEnabled={vibrationEnabled}
-        onCollapsedChange={setIsWidgetCollapsed}
-      />
-    </ThemedView>
+      </ThemedView>
+    </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
+  gestureRoot: {
+    flex: 1,
+  },
   container: {
     flex: 1,
     alignItems: 'center',

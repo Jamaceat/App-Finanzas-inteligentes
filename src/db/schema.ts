@@ -82,6 +82,7 @@ export const appSettings = sqliteTable('app_settings', {
     .notNull()
     .default('days'),
   vibrationEnabled: integer('vibration_enabled', { mode: 'boolean' }).notNull().default(true),
+  calendarSimulationOccurrences: integer('calendar_simulation_occurrences').notNull().default(24),
   updatedAt: integer('updated_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),

@@ -38,7 +38,7 @@ En ambos casos los toques de pan nunca llegaban al `ScrollView` de RNGH: la pant
 
 **Regla general para el proyecto**: no usar el `ScrollView` (u otros componentes) de `react-native-gesture-handler` en pantallas que vivan dentro de `NativeTabs` o de un `Stack.Screen` con `presentation: 'modal'` — esas jerarquías nativas quedan fuera del `GestureHandlerRootView` raíz y los gestos de RNGH no llegan. Usar siempre el `ScrollView` nativo de `react-native` salvo que se necesite explícitamente una feature de gesture-handler (en cuyo caso hay que envolver esa pantalla en su propio `GestureHandlerRootView` anidado).
 
-**Pendiente de verificar**: `src/components/floating-expense-point.tsx` usa `GestureDetector` para el drag dentro de `asignar-gastos.tsx`, que es modal. No fue reportado como roto, pero por el mismo mecanismo descrito arriba podría estar afectado — si en el futuro aparece un bug de drag ahí, revisar primero si el `GestureDetector` está quedando fuera del `GestureHandlerRootView` raíz (ver solución aplicada a Home más abajo).
+**Actualización**: el pendiente de `floating-expense-point.tsx` / `asignar-gastos.tsx` se verificó y arregló — ver sección siguiente.
 
 ## Home sin scroll vertical y swipe de tarjetas potencialmente roto (NativeTabs)
 
@@ -56,3 +56,15 @@ En ambos casos los toques de pan nunca llegaban al `ScrollView` de RNGH: la pant
 - Se le agregó `.activeOffsetX([-10, 10]).failOffsetY([-10, 10])` al `Gesture.Pan()` de `PendingExpenseCard` ([index.tsx:820-822](<src/app/(tabs)/index.tsx#L820-L822>)) para que solo se active con arrastres predominantemente horizontales — sin esto, el pan competiría con el nuevo scroll vertical y podría bloquear el desplazamiento al tocar sobre una tarjeta.
 
 **Regla general para el proyecto**: cualquier pantalla de `NativeTabs` o modal que use componentes de `react-native-gesture-handler` más allá de `ScrollView` (p. ej. `GestureDetector`/`Gesture.Pan`) necesita su propio `GestureHandlerRootView` anidado — el de `_layout.tsx` no alcanza esas superficies nativas. Y cuando se agrega un `ScrollView` vertical alrededor de contenido que ya tiene gestos de pan/swipe horizontales, restringir el gesto con `activeOffsetX`/`failOffsetY` para que no le gane la carrera al scroll.
+
+## Drag-and-drop de "Asignar gastos" roto por el mismo motivo (modal sin GestureHandlerRootView)
+
+**Archivos**: `src/app/asignar-gastos.tsx`, `src/components/floating-expense-point.tsx`
+
+**Síntoma**: Último pendiente de verificar de la ronda anterior. `asignar-gastos.tsx` se registra con `presentation: 'modal'` en `src/app/_layout.tsx`, igual que `recurring-rules.tsx`. Su interacción principal —tocar un gasto flotante (`FloatingExpensePoint`) para enfocarlo y arrastrarlo hasta un tanque— depende enteramente de `Gesture.Tap()` / `Gesture.Pan()` / `Gesture.Exclusive()` + `GestureDetector`, todos de `react-native-gesture-handler`.
+
+**Causa**: Mismo mecanismo confirmado en las dos entradas anteriores: los modales nativos de `react-native-screens` montan su contenido fuera del árbol del `GestureHandlerRootView` raíz de `src/app/_layout.tsx`, así que el `GestureDetector` de `FloatingExpensePoint` no recibía los toques — el tap para enfocar y el drag para asignar el gasto no funcionaban. `PocketWidget` (el otro componente grande de esta pantalla) no usa `react-native-gesture-handler` en absoluto, así que no estaba afectado.
+
+**Solución**: Se envolvió el `return` completo de `asignar-gastos.tsx` en un `GestureHandlerRootView` anidado (`styles.gestureRoot`, `flex: 1`), igual que en Home ([asignar-gastos.tsx:198-274](src/app/asignar-gastos.tsx#L198-L274)). No hace falta restringir el gesto con `activeOffsetX`/`failOffsetY` acá porque esta pantalla no tiene ningún `ScrollView` compitiendo por el gesto — es un lienzo libre de arrastre.
+
+**Regla general para el proyecto** (consolidada): toda pantalla registrada con `presentation: 'modal'` en `src/app/_layout.tsx`, o toda pantalla de `NativeTabs`, que use cualquier componente de `react-native-gesture-handler` (`ScrollView`, `GestureDetector`, `Swipeable`, etc.) necesita revisión: para `ScrollView` preferir el nativo de `react-native`; para gestos custom (`GestureDetector`/`Gesture.*`) envolver esa pantalla en su propio `GestureHandlerRootView` anidado. Con esto quedan cubiertas las cinco pantallas de la app que usaban RNGH fuera del `GestureHandlerRootView` raíz.

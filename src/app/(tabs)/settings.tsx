@@ -18,6 +18,7 @@ import {
   updateTankMaxRenewal,
   watchAppSettingsRow,
   updateVibrationEnabled,
+  updateCalendarSimulationOccurrences,
   type TankMaxRenewalUnit,
 } from '@/db/queries/settings';
 
@@ -53,6 +54,7 @@ export default function SettingsScreen() {
           {row && (
             <View style={styles.formsContainer}>
               <RenewalForm value={row.tankMaxRenewalValue} unit={row.tankMaxRenewalUnit} />
+              <SimulationForm value={row.calendarSimulationOccurrences} />
               <VibrationForm enabled={row.vibrationEnabled} />
             </View>
           )}
@@ -99,6 +101,42 @@ function RenewalForm({ value, unit }: { value: number; unit: TankMaxRenewalUnit 
             />
           ))}
         </View>
+      </View>
+
+      <Pressable onPress={handleSave} style={({ pressed }) => pressed && styles.pressed}>
+        <ThemedView type="backgroundSelected" style={styles.submitButton}>
+          <ThemedText type="smallBold">Guardar</ThemedText>
+        </ThemedView>
+      </Pressable>
+    </ThemedView>
+  );
+}
+
+function SimulationForm({ value }: { value: number }) {
+  const theme = useTheme();
+  const [text, setText] = useState(String(value));
+
+  async function handleSave() {
+    const parsed = Math.max(1, Number(text) || 1);
+    await updateCalendarSimulationOccurrences(parsed);
+  }
+
+  return (
+    <ThemedView type="backgroundElement" style={styles.form}>
+      <ThemedText type="smallBold">Ocurrencias a simular en calendario</ThemedText>
+      <ThemedText type="small" themeColor="textSecondary">
+        Define cuántas ocurrencias de reglas recurrentes se simularán y mostrarán en el calendario a partir del punto de partida.
+      </ThemedText>
+
+      <View style={styles.row}>
+        <TextInput
+          value={text}
+          onChangeText={(t) => setText(t.replace(/\D/g, ''))}
+          keyboardType="number-pad"
+          placeholder="24"
+          placeholderTextColor={theme.textSecondary}
+          style={[styles.input, { color: theme.text, backgroundColor: theme.background }]}
+        />
       </View>
 
       <Pressable onPress={handleSave} style={({ pressed }) => pressed && styles.pressed}>
