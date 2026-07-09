@@ -35,6 +35,7 @@ import {
   FREE_TANK_COLOR,
   SEARCH_LONG_PRESS_DURATION_MS,
   SEARCH_PRESS_RELEASE_DURATION_MS,
+  SPECIAL_TANK_COLOR,
   TANK_CAROUSEL_HEIGHT,
   TANK_COLOR,
   TANK_GAP,
@@ -56,6 +57,7 @@ import {
   computeFreeCashTank,
   computeIncomeTanks,
   computePendingExpenses,
+  computeSpecialTanks,
   type IncomeTank,
   type PendingExpense,
 } from '@/db/queries/tanks';
@@ -137,6 +139,7 @@ export default function HomeScreen() {
     return computeFreeCashTank(rules, transactions, windowStart);
   }, [rules, transactions, settings.tankMaxRenewalValue, settings.tankMaxRenewalUnit]);
   const pendingExpenses = useMemo(() => computePendingExpenses(rules), [rules]);
+  const specialTanks = useMemo(() => computeSpecialTanks(rules, transactions), [rules, transactions]);
 
   const allTanks = useMemo(() => {
     const list: SearchTankItem[] = [
@@ -157,8 +160,17 @@ export default function HomeScreen() {
         color: TANK_COLOR,
       });
     });
+    specialTanks.forEach((tank) => {
+      list.push({
+        ruleId: tank.ruleId,
+        label: tank.label,
+        amount: tank.level,
+        capacity: Math.max(tank.capacity, 1),
+        color: SPECIAL_TANK_COLOR,
+      });
+    });
     return list;
-  }, [freeCashTank, incomeTanks]);
+  }, [freeCashTank, incomeTanks, specialTanks]);
 
   const handleSelectTank = (selected: SearchTankItem) => {
     setModalVisible(false);
@@ -170,6 +182,11 @@ export default function HomeScreen() {
       const idx = incomeTanks.findIndex((t) => t.ruleId === selected.ruleId);
       if (idx !== -1) {
         targetIndex = idx + 1;
+      } else {
+        const specialIdx = specialTanks.findIndex((t) => t.ruleId === selected.ruleId);
+        if (specialIdx !== -1) {
+          targetIndex = incomeTanks.length + 1 + specialIdx;
+        }
       }
     }
 
@@ -306,6 +323,16 @@ export default function HomeScreen() {
                   amount={tank.level}
                   capacity={Math.max(tank.capacity, 1)}
                   color={TANK_COLOR}
+                  tilt={tilt}
+                />
+              ))}
+              {specialTanks.map((tank) => (
+                <Tank
+                  key={tank.ruleId}
+                  label={tank.label}
+                  amount={tank.level}
+                  capacity={Math.max(tank.capacity, 1)}
+                  color={SPECIAL_TANK_COLOR}
                   tilt={tilt}
                 />
               ))}

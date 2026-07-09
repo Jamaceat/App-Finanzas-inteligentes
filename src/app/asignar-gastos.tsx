@@ -12,6 +12,7 @@ import { PocketWidget } from '@/components/pocket-widget';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import {
   TANK_COLOR,
+  SPECIAL_TANK_COLOR,
   BUBBLE_PILL_SCALE_MIN,
   BUBBLE_PILL_SCALE_MAX,
   CLUSTER_SCALE_MIN,
@@ -26,7 +27,9 @@ import {
 } from '@/constants/constants';
 import { DEFAULT_SECTION_NAME } from '@/db/queries/sections';
 import {
+  assignExpenseToNewSpecialTank,
   assignExpenseToTank,
+  splitAndAssignExpenseToNewSpecialTank,
   splitAndAssignExpenseToTank,
   unassignExpenseFromTank,
 } from '@/db/queries/transactions';
@@ -37,9 +40,13 @@ import {
   useTankTransactions,
 } from '@/providers/app-data';
 import {
+  addInterval,
+  advanceDate,
+  computeFreeCashTank,
   computeIncomeTanks,
   computePendingExpenses,
   computePlannedExpenses,
+  computeSpecialTanks,
   getCycleWindow,
   type PendingExpense,
 } from '@/db/queries/tanks';
@@ -58,6 +65,9 @@ import {
 } from '@/lib/bubble-clusters';
 
 const EXPENSE_POINT_COLOR = '#E5484D';
+// Sentinel para el target "Tanque especial temporal" en el picker radial: nunca
+// colisiona con un ruleId real (autoincremental, siempre positivo).
+const SPECIAL_TANK_TARGET_ID = -1;
 
 function hashString(value: string): number {
   let hash = 2166136261;
@@ -98,6 +108,8 @@ export default function AsignarGastosScreen() {
 
   const vibrationEnabled = settingsRows?.[0]?.vibrationEnabled ?? true;
   const allowPartialAssignment = settingsRows?.[0]?.allowPartialTankAssignment ?? false;
+  const tankMaxRenewalValue = settingsRows?.[0]?.tankMaxRenewalValue ?? 30;
+  const tankMaxRenewalUnit = settingsRows?.[0]?.tankMaxRenewalUnit ?? 'days';
 
   const navigation = useNavigation();
   const [isWidgetCollapsed, setIsWidgetCollapsed] = useState(true);
@@ -115,17 +127,50 @@ export default function AsignarGastosScreen() {
 
   const incomeTanks = useMemo(() => computeIncomeTanks(rules, transactions), [rules, transactions]);
   const pendingExpenses = useMemo(() => computePendingExpenses(rules), [rules]);
+  const specialTanks = useMemo(() => computeSpecialTanks(rules, transactions), [rules, transactions]);
+  const freeCashTank = useMemo(() => {
+    const windowStart = addInterval(new Date(), -tankMaxRenewalValue, tankMaxRenewalUnit);
+    return computeFreeCashTank(rules, transactions, windowStart);
+  }, [rules, transactions, tankMaxRenewalValue, tankMaxRenewalUnit]);
 
+  // Target radial "Tanque especial temporal": siempre se ofrece (validado por su
+  // propio nivel/capacidad, igual que cualquier otro tanque) para cubrir un gasto con
+  // Libre cuando ningún tanque real alcanza. Los tanques especiales ya existentes NO
+  // se agregan acá: cada uno ya está definido para su propio gasto (ver point 6).
   const tanks: MiniTankTarget[] = useMemo(
-    () =>
-      incomeTanks.map((tank) => ({
+    () => [
+      ...incomeTanks.map((tank) => ({
         ruleId: tank.ruleId,
         label: tank.label,
         color: TANK_COLOR,
         level: tank.level,
         capacity: tank.capacity,
       })),
-    [incomeTanks],
+      {
+        ruleId: SPECIAL_TANK_TARGET_ID,
+        label: 'Tanque especial (Libre)',
+        color: SPECIAL_TANK_COLOR,
+        level: freeCashTank.level,
+        capacity: freeCashTank.capacity,
+      },
+    ],
+    [incomeTanks, freeCashTank],
+  );
+
+  // Tanques para que el Bolsillo pueda resolver label/color de gastos ya
+  // planificados, incluidos los que quedaron sobre un tanque especial.
+  const pocketTanks: MiniTankTarget[] = useMemo(
+    () => [
+      ...tanks.filter((tank) => tank.ruleId !== SPECIAL_TANK_TARGET_ID),
+      ...specialTanks.map((tank) => ({
+        ruleId: tank.ruleId,
+        label: tank.label,
+        color: SPECIAL_TANK_COLOR,
+        level: tank.level,
+        capacity: tank.capacity,
+      })),
+    ],
+    [tanks, specialTanks],
   );
 
   const totalAvailable = useMemo(() => incomeTanks.reduce((sum, tank) => sum + tank.level, 0), [incomeTanks]);
@@ -175,6 +220,41 @@ export default function AsignarGastosScreen() {
 
   async function handleAllocateRule(expense: PendingExpense, incomeRuleId: number, allocatedAmount: number) {
     const fullAmount = expense.estimatedAmount ?? 0;
+
+    if (incomeRuleId === SPECIAL_TANK_TARGET_ID) {
+      // Estimación inicial del vencimiento: un ciclo hacia adelante. Se corrige con
+      // la fecha real de "próximo cobro" cuando el gasto se confirma en Confirmar.
+      const expiresAt = advanceDate(
+        expense.nextDueDate,
+        expense.frequency,
+        expense.customIntervalValue,
+        expense.customIntervalUnit,
+      );
+
+      if (allocatedAmount >= fullAmount) {
+        await assignExpenseToNewSpecialTank({
+          expenseRuleId: expense.ruleId,
+          sectionId: expense.sectionId,
+          allocatedAmount: fullAmount,
+          expiresAt,
+        });
+        return;
+      }
+
+      await splitAndAssignExpenseToNewSpecialTank({
+        expenseRuleId: expense.ruleId,
+        sectionId: expense.sectionId,
+        label: expense.label,
+        allocatedAmount,
+        remainderAmount: fullAmount - allocatedAmount,
+        frequency: expense.frequency,
+        customIntervalValue: expense.customIntervalValue,
+        customIntervalUnit: expense.customIntervalUnit,
+        currentDueDate: expense.nextDueDate,
+        expiresAt,
+      });
+      return;
+    }
 
     if (allocatedAmount >= fullAmount) {
       await assignExpenseToTank({
@@ -454,7 +534,7 @@ export default function AsignarGastosScreen() {
               No hay gastos sin asignar.
             </ThemedText>
           )}
-          {points.length > 0 && tanks.length === 0 && (
+          {points.length > 0 && incomeTanks.length === 0 && (
             <ThemedText themeColor="textSecondary" style={styles.emptyText}>
               Creá una regla de ingreso recurrente en Secciones para poder asignar estos gastos.
             </ThemedText>
@@ -511,7 +591,7 @@ export default function AsignarGastosScreen() {
         )}
 
         <PocketWidget
-          tanks={tanks}
+          tanks={pocketTanks}
           expenses={pocketExpenses}
           onUnassign={(expenseId) => unassignExpenseFromTank(expenseId)}
           vibrationEnabled={vibrationEnabled}

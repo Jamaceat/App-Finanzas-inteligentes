@@ -5,6 +5,7 @@ import { transactions } from '@/db/schema';
 import {
   archiveRecurringRule,
   createRecurringRule,
+  createSpecialTank,
   updateNextDueDate,
   updatePlannedTankRuleId,
   type CustomIntervalUnit,
@@ -178,6 +179,101 @@ export async function splitAndAssignExpenseToTank(input: {
   });
 }
 
+// Asignar un gasto pendiente a un tanque especial temporal recién creado (desde
+// asignar-gastos): reserva `allocatedAmount` de Libre y planifica el gasto sobre ese
+// tanque, igual que assignExpenseToTank pero creando el tanque en el mismo commit.
+// expiresAt es una estimación inicial (un ciclo hacia adelante); se corrige con el
+// vencimiento real al confirmar (ver confirmRecurringOccurrences con isSpecialTank).
+export async function assignExpenseToNewSpecialTank(input: {
+  expenseRuleId: number;
+  sectionId: number;
+  allocatedAmount: number;
+  expiresAt: Date;
+}) {
+  return db.transaction((tx) => {
+    const [tank] = createSpecialTank(
+      {
+        sectionId: input.sectionId,
+        expenseRuleId: input.expenseRuleId,
+        capacity: input.allocatedAmount,
+        expiresAt: input.expiresAt,
+      },
+      tx,
+    ).all();
+    updatePlannedTankRuleId(input.expenseRuleId, tank.id, tx).all();
+    return tank;
+  });
+}
+
+// Variante de splitAndAssignExpenseToTank para cuando el destino es un tanque especial
+// nuevo: el disponible de Libre no alcanza para todo el gasto, así que se parte la
+// regla igual que con un tanque real, pero la parte "continuada" queda financiada por
+// un tanque especial recién creado en vez de un ingreso existente.
+export async function splitAndAssignExpenseToNewSpecialTank(input: {
+  expenseRuleId: number;
+  sectionId: number;
+  label: string;
+  allocatedAmount: number;
+  remainderAmount: number;
+  frequency: RecurringFrequency;
+  customIntervalValue?: number | null;
+  customIntervalUnit?: CustomIntervalUnit | null;
+  currentDueDate: Date;
+  expiresAt: Date;
+}) {
+  return db.transaction((tx) => {
+    try {
+      archiveRecurringRule(input.expenseRuleId, tx).all();
+
+      const [continuedRule] = createRecurringRule(
+        {
+          sectionId: input.sectionId,
+          label: input.label,
+          kind: 'expense',
+          frequency: input.frequency,
+          customIntervalValue: input.customIntervalValue ?? null,
+          customIntervalUnit: input.customIntervalUnit ?? null,
+          isVariableAmount: false,
+          estimatedAmount: input.allocatedAmount,
+          nextDueDate: input.currentDueDate,
+        },
+        tx,
+      ).all();
+
+      const [tank] = createSpecialTank(
+        {
+          sectionId: input.sectionId,
+          expenseRuleId: continuedRule.id,
+          capacity: input.allocatedAmount,
+          expiresAt: input.expiresAt,
+        },
+        tx,
+      ).all();
+      updatePlannedTankRuleId(continuedRule.id, tank.id, tx).all();
+
+      createRecurringRule(
+        {
+          sectionId: input.sectionId,
+          label: input.label,
+          kind: 'expense',
+          frequency: input.frequency,
+          customIntervalValue: input.customIntervalValue ?? null,
+          customIntervalUnit: input.customIntervalUnit ?? null,
+          isVariableAmount: false,
+          estimatedAmount: input.remainderAmount,
+          nextDueDate: input.currentDueDate,
+        },
+        tx,
+      ).all();
+
+      return continuedRule;
+    } catch (err) {
+      console.error('splitAndAssignExpenseToNewSpecialTank transaction error:', err);
+      throw err;
+    }
+  });
+}
+
 export async function confirmRecurringOccurrences(input: {
   ruleId: number;
   sectionId: number;
@@ -186,6 +282,9 @@ export async function confirmRecurringOccurrences(input: {
   allocatedIncomeRuleId?: number | null;
   occurrences: { occurredAt: Date; amount: number }[];
   nextDueDate: Date;
+  // El tanque usado es un tanque especial temporal: además de recordarlo como plan,
+  // hay que sincronizar su propio vencimiento con el próximo cobro real del gasto.
+  isSpecialTank?: boolean;
 }) {
   // Un solo commit para los N inserts + updates de la regla: sin esto, cada await
   // autocommitea y dispara una ola de refetch de todos los useLiveQuery montados.
@@ -213,6 +312,10 @@ export async function confirmRecurringOccurrences(input: {
     // aparece con el tanque preseleccionado la próxima vez, sin tener que reasignarlo.
     if (input.kind === 'expense' && input.allocatedIncomeRuleId) {
       updatePlannedTankRuleId(input.ruleId, input.allocatedIncomeRuleId, tx).all();
+
+      if (input.isSpecialTank) {
+        updateNextDueDate(input.allocatedIncomeRuleId, input.nextDueDate, tx).all();
+      }
     }
 
     return created;

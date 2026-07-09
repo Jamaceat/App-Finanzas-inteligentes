@@ -58,6 +58,13 @@ export const recurringRules = sqliteTable(
     plannedTankRuleId: integer('planned_tank_rule_id').references(
       (): AnySQLiteColumn => recurringRules.id,
     ),
+    // 'special' marca un tanque temporal creado desde el dinero Libre para cubrir un
+    // gasto puntual cuando ningún tanque real alcanza (ver computeSpecialTanks). Solo
+    // aplica a filas kind='income'; specialTankExpenseId apunta al gasto dueño (1 a 1).
+    tankKind: text('tank_kind', { enum: ['normal', 'special'] }).notNull().default('normal'),
+    specialTankExpenseId: integer('special_tank_expense_id').references(
+      (): AnySQLiteColumn => recurringRules.id,
+    ),
     reminderEnabled: integer('reminder_enabled', { mode: 'boolean' }).notNull().default(true),
     archivedAt: integer('archived_at', { mode: 'timestamp' }),
     createdAt: integer('created_at', { mode: 'timestamp' })

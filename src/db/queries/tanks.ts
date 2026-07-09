@@ -135,6 +135,8 @@ type Rule = {
   nextDueDate: Date;
   archivedAt: Date | null;
   plannedTankRuleId: number | null;
+  tankKind: 'normal' | 'special';
+  specialTankExpenseId: number | null;
 };
 
 type Transaction = {
@@ -248,7 +250,7 @@ export function computeIncomeTanks(rules: Rule[], transactions: Transaction[]): 
   const index = indexTankTransactions(transactions);
 
   return rules
-    .filter((rule) => rule.kind === 'income' && !rule.archivedAt)
+    .filter((rule) => rule.kind === 'income' && !rule.archivedAt && rule.tankKind !== 'special')
     .map((rule) => {
       const window = getCycleWindow(rule);
       const received = sumInWindow(index.incomeByRuleId.get(rule.id) ?? EMPTY_TRANSACTIONS, window);
@@ -330,11 +332,28 @@ export function computeFreeCashTank(
 
   const archivedLeftover = Math.max(0, archivedIncomes - archivedExpenses);
 
+  // 5. Capital ya comprometido en tanques especiales temporales (ver
+  // computeSpecialTanks): se resta la capacidad completa, no el nivel restante, porque
+  // esa plata queda reservada para su gasto dueño desde el momento en que se crea el
+  // tanque, aunque todavía no se haya gastado.
+  const now = new Date();
+  const specialTanksReserved = rules
+    .filter(
+      (rule) =>
+        rule.kind === 'income' && rule.tankKind === 'special' && !rule.archivedAt && rule.nextDueDate > now,
+    )
+    .reduce((sum, rule) => sum + (rule.estimatedAmount ?? 0), 0);
+
   // Level is: all free incomes minus all free expenses plus leftovers from closed active and archived cycles
-  const level = Math.max(0, freeIncomeAllTime - freeExpenseAllTime) + activeRulesLeftover + archivedLeftover;
+  const level = Math.max(
+    0,
+    Math.max(0, freeIncomeAllTime - freeExpenseAllTime) +
+      activeRulesLeftover +
+      archivedLeftover -
+      specialTanksReserved,
+  );
 
   // Capacity is the non-recurring incomes in the current window
-  const now = new Date();
   const window = { start: windowStart, end: now };
   const freeIncomeInWindow = sumInWindow(index.freeIncomes, window);
 
@@ -342,6 +361,49 @@ export function computeFreeCashTank(
     capacity: Math.max(freeIncomeInWindow, 1),
     level,
   };
+}
+
+export type SpecialTank = {
+  ruleId: number;
+  sectionId: number;
+  label: string;
+  expenseRuleId: number;
+  capacity: number;
+  level: number;
+  expiresAt: Date;
+};
+
+// Tanques especiales temporales activos (ver comentario en schema.ts): uno por gasto
+// dueño, financiados con capital ya restado de Libre en computeFreeCashTank. El label
+// lleva un índice que se recalcula sobre el conjunto activo (ordenado por id), así los
+// números se reciclan solos cuando un tanque expira/se archiva, sin guardar nada extra.
+export function computeSpecialTanks(rules: Rule[], transactions: Transaction[]): SpecialTank[] {
+  const now = new Date();
+  const index = indexTankTransactions(transactions);
+
+  const active = rules
+    .filter(
+      (rule) =>
+        rule.kind === 'income' && rule.tankKind === 'special' && !rule.archivedAt && rule.nextDueDate > now,
+    )
+    .sort((a, b) => a.id - b.id);
+
+  return active.map((rule, i) => {
+    const allocated = (index.expenseByAllocatedRuleId.get(rule.id) ?? EMPTY_TRANSACTIONS).reduce(
+      (sum, t) => sum + t.amount,
+      0,
+    );
+    const capacity = rule.estimatedAmount ?? 0;
+    return {
+      ruleId: rule.id,
+      sectionId: rule.sectionId,
+      label: `Tanque especial #${i + 1}`,
+      expenseRuleId: rule.specialTankExpenseId as number,
+      capacity,
+      level: Math.max(0, capacity - allocated),
+      expiresAt: rule.nextDueDate,
+    };
+  });
 }
 
 export type PendingExpense = {
@@ -431,7 +493,10 @@ export function computePendingConfirmations(
 ): PendingConfirmation[] {
   const now = new Date();
   return rules
-    .filter((rule) => rule.kind === kind && !rule.archivedAt && rule.nextDueDate < now)
+    .filter(
+      (rule) =>
+        rule.kind === kind && !rule.archivedAt && rule.nextDueDate < now && rule.tankKind !== 'special',
+    )
     .map((rule) => {
       const occurrences: Date[] = [];
       let current = rule.nextDueDate;

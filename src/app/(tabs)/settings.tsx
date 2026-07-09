@@ -23,7 +23,7 @@ import {
   resetAllData,
   type TankMaxRenewalUnit,
 } from '@/db/queries/settings';
-import { useAppSettingsRows } from '@/providers/app-data';
+import { useAppSettingsRows, useReloadApp } from '@/providers/app-data';
 
 const UNIT_OPTIONS: { value: TankMaxRenewalUnit; label: string }[] = [
   { value: 'days', label: 'Días' },
@@ -315,12 +315,14 @@ function Chip({
 function ResetDataForm() {
   const [modalVisible, setModalVisible] = useState(false);
   const [loading, setLoading] = useState(false);
+  const reloadApp = useReloadApp();
 
   async function handleReset() {
     setLoading(true);
     try {
       await resetAllData();
       setModalVisible(false);
+      reloadApp();
     } catch (error) {
       console.error('Error resetting database:', error);
     } finally {

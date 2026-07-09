@@ -1,0 +1,2 @@
+ALTER TABLE `recurring_rules` ADD `tank_kind` text DEFAULT 'normal' NOT NULL;--> statement-breakpoint
+ALTER TABLE `recurring_rules` ADD `special_tank_expense_id` integer REFERENCES recurring_rules(id);

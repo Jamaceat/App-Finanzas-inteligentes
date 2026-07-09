@@ -3,6 +3,8 @@ import { Spacing } from '@/constants/theme';
 // Home — tanque de ingresos y tanque "Libre"
 export const TANK_COLOR = '#0091FF';
 export const FREE_TANK_COLOR = '#12A594';
+// Tanque especial temporal (financiado desde Libre para un solo gasto recurrente)
+export const SPECIAL_TANK_COLOR = '#F76B15';
 
 // Home — dimensiones del carrusel de tanques
 export const TANK_WIDTH = 120;

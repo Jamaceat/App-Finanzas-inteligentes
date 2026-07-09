@@ -1,7 +1,7 @@
-import { createContext, useContext, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
 
-import { listActiveRecurringRules } from '@/db/queries/recurring-rules';
+import { listActiveRecurringRules, pruneExpiredSpecialTanks } from '@/db/queries/recurring-rules';
 import { listActiveSections } from '@/db/queries/sections';
 import { watchAppSettingsRow } from '@/db/queries/settings';
 import { listTankTransactions } from '@/db/queries/transactions';
@@ -20,12 +20,26 @@ const ActiveRulesContext = createContext<ActiveRules | null>(null);
 const ActiveSectionsContext = createContext<ActiveSections | null>(null);
 const AppSettingsRowsContext = createContext<AppSettingsRows | null>(null);
 const TankTransactionsContext = createContext<TankTransactions | null>(null);
+const AppDataReloadContext = createContext<(() => void) | null>(null);
 
-export function AppDataProvider({ children }: { children: ReactNode }) {
-  const { data: activeRules } = useLiveQuery(listActiveRecurringRules());
+function AppDataProviderInner({ children }: { children: ReactNode }) {
+  const { data: activeRules } = useLiveQuery(listActiveRecurringRules({ includeSpecialTanks: true }));
   const { data: activeSections } = useLiveQuery(listActiveSections());
   const { data: settingsRows } = useLiveQuery(watchAppSettingsRow());
   const { data: tankTransactions } = useLiveQuery(listTankTransactions());
+
+  // Un tanque especial temporal deja de existir en el próximo cobro del gasto que lo
+  // generó (ver schema.ts / computeSpecialTanks): se archiva y se libera el gasto para
+  // que vuelva a flotar como burbuja pendiente. Se revisa acá, centralizado, cada vez
+  // que cambian las reglas activas.
+  useEffect(() => {
+    const expiredIds = activeRules
+      .filter((rule) => rule.kind === 'income' && rule.tankKind === 'special' && rule.nextDueDate <= new Date())
+      .map((rule) => rule.id);
+    if (expiredIds.length > 0) {
+      Promise.resolve(pruneExpiredSpecialTanks(expiredIds)).catch(console.error);
+    }
+  }, [activeRules]);
 
   return (
     <ActiveRulesContext.Provider value={activeRules}>
@@ -37,6 +51,22 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         </AppSettingsRowsContext.Provider>
       </ActiveSectionsContext.Provider>
     </ActiveRulesContext.Provider>
+  );
+}
+
+export function AppDataProvider({ children }: { children: ReactNode }) {
+  const [reloadKey, setReloadKey] = useState(0);
+
+  const reloadApp = () => {
+    setReloadKey((prev) => prev + 1);
+  };
+
+  return (
+    <AppDataReloadContext.Provider value={reloadApp}>
+      <AppDataProviderInner key={reloadKey}>
+        {children}
+      </AppDataProviderInner>
+    </AppDataReloadContext.Provider>
   );
 }
 
@@ -66,4 +96,13 @@ export function useAppSettingsRows(): AppSettingsRows {
 /** Transacciones con solo las columnas de la matemática de tanques, vivas ante cambios. */
 export function useTankTransactions(): TankTransactions {
   return useRequiredContext(TankTransactionsContext, 'useTankTransactions');
+}
+
+/** Obtiene la función para forzar la recarga completa del contexto y pantallas de la app. */
+export function useReloadApp(): () => void {
+  const value = useContext(AppDataReloadContext);
+  if (value === null) {
+    throw new Error('useReloadApp debe usarse dentro de AppDataProvider');
+  }
+  return value;
 }

@@ -1,4 +1,4 @@
-import { and, count, eq, isNull, like } from 'drizzle-orm';
+import { and, count, eq, inArray, isNull, like, ne } from 'drizzle-orm';
 
 import { db } from '@/db/client';
 import { recurringRules } from '@/db/schema';
@@ -12,8 +12,16 @@ export type RecurringKind = (typeof recurringRules.$inferSelect)['kind'];
 export type CustomIntervalUnit = NonNullable<
   (typeof recurringRules.$inferSelect)['customIntervalUnit']
 >;
+export type TankKind = (typeof recurringRules.$inferSelect)['tankKind'];
 
-export type RecurringRuleFilter = { kind?: RecurringKind; search?: string };
+export type RecurringRuleFilter = {
+  kind?: RecurringKind;
+  search?: string;
+  // Los tanques especiales temporales (ver computeSpecialTanks) no son reglas
+  // editables por el usuario: se excluyen de listados/conteos salvo que se pidan
+  // explícitamente (AppDataProvider los necesita para la matemática de tanques).
+  includeSpecialTanks?: boolean;
+};
 
 function recurringRuleFilterConditions(filter?: RecurringRuleFilter) {
   const search = filter?.search?.trim();
@@ -21,6 +29,7 @@ function recurringRuleFilterConditions(filter?: RecurringRuleFilter) {
     isNull(recurringRules.archivedAt),
     filter?.kind !== undefined ? eq(recurringRules.kind, filter.kind) : undefined,
     search ? like(recurringRules.label, `%${search}%`) : undefined,
+    filter?.includeSpecialTanks ? undefined : ne(recurringRules.tankKind, 'special'),
   ].filter((condition) => condition !== undefined);
 }
 
@@ -62,6 +71,8 @@ export type CreateRecurringRuleInput = {
   nextDueDate: Date;
   reminderEnabled?: boolean;
   plannedTankRuleId?: number | null;
+  tankKind?: TankKind;
+  specialTankExpenseId?: number | null;
 };
 
 export function createRecurringRule(input: CreateRecurringRuleInput, executor: DbExecutor = db) {
@@ -104,6 +115,66 @@ export function updateRecurringRule(
   }>,
 ) {
   return db.update(recurringRules).set(input).where(eq(recurringRules.id, id)).returning();
+}
+
+// Los tanques especiales viven en recurring_rules (kind='income', tankKind='special')
+// para reusar toda la maquinaria existente (plannedTankRuleId, allocatedIncomeRuleId,
+// computeIncomeTanks/computeFreeCashTank). nextDueDate guarda su vencimiento: el
+// próximo cobro del gasto dueño, momento en el que debe desaparecer (ver
+// pruneExpiredSpecialTanks). El label real ("Tanque especial #N") se calcula en
+// computeSpecialTanks a partir del conjunto activo, así los índices se reciclan solos.
+export function createSpecialTank(
+  input: { sectionId: number; expenseRuleId: number; capacity: number; expiresAt: Date },
+  executor: DbExecutor = db,
+) {
+  return executor
+    .insert(recurringRules)
+    .values({
+      sectionId: input.sectionId,
+      label: 'Tanque especial',
+      kind: 'income',
+      frequency: 'custom',
+      customIntervalValue: 1,
+      customIntervalUnit: 'days',
+      isVariableAmount: false,
+      estimatedAmount: input.capacity,
+      nextDueDate: input.expiresAt,
+      reminderEnabled: false,
+      tankKind: 'special',
+      specialTankExpenseId: input.expenseRuleId,
+    })
+    .returning();
+}
+
+// Sube la capacidad de un tanque especial ya existente (p. ej. se habían planificado
+// menos ciclos de los que terminan confirmándose) y refresca su vencimiento.
+export function updateSpecialTank(
+  id: number,
+  input: { capacity: number; expiresAt: Date },
+  executor: DbExecutor = db,
+) {
+  return executor
+    .update(recurringRules)
+    .set({ estimatedAmount: input.capacity, nextDueDate: input.expiresAt })
+    .where(eq(recurringRules.id, id))
+    .returning();
+}
+
+// Un tanque especial deja de existir en el próximo cobro del gasto que lo generó:
+// se archiva y se libera el plannedTankRuleId del gasto (vuelve a flotar como
+// burbuja pendiente en asignar-gastos). Un solo commit para todos los vencidos.
+export function pruneExpiredSpecialTanks(ids: number[]) {
+  if (ids.length === 0) return;
+  return db.transaction((tx) => {
+    tx.update(recurringRules)
+      .set({ plannedTankRuleId: null })
+      .where(inArray(recurringRules.plannedTankRuleId, ids))
+      .run();
+    tx.update(recurringRules)
+      .set({ archivedAt: new Date() })
+      .where(inArray(recurringRules.id, ids))
+      .run();
+  });
 }
 
 export function archiveRecurringRule(id: number, executor: DbExecutor = db) {
