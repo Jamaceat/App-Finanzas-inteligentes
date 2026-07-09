@@ -87,3 +87,58 @@ realidad, y recién ahí se crea la transacción.
 - [src/app/(tabs)/confirmar.tsx](src/app/(tabs)/confirmar.tsx) — pantalla nueva (toggle ingreso/gasto + cards + modal).
 - [src/components/app-tabs.tsx](src/components/app-tabs.tsx) y [app-tabs.web.tsx](src/components/app-tabs.web.tsx) — registro del tab.
 - [src/app/(tabs)/index.tsx](src/app/(tabs)/index.tsx) — remoción del `useEffect` de auto-rollover.
+
+---
+
+## 4. Asignar Gastos a un Tanque — Planificar vs. Confirmar
+
+Arrastrar un gasto recurrente vencido a un tanque en `asignar-gastos` (o asignarlo desde
+Home) **no** es lo mismo que confirmar que el pago ya ocurrió: es solo reservar de qué
+tanque va a salir la plata. Antes de este cambio, asignar creaba una transacción real y
+avanzaba `nextDueDate` en el acto — por lo que el gasto desaparecía de la pestaña Confirmar
+aunque el usuario nunca hubiese confirmado el pago ahí.
+
+### Planificación (`plannedTankRuleId`)
+- Columna nueva en `recurring_rules`: `plannedTankRuleId` (nullable, referencia a otra fila
+  de `recurring_rules`). Solo aplica a reglas `kind = 'expense'`.
+- Al asignar (`assignExpenseToTank` en [transactions.ts](src/db/queries/transactions.ts))
+  solo se setea esta columna. No se crea `transaction`, no se toca `nextDueDate`.
+- `computePendingExpenses` ([tanks.ts](src/db/queries/tanks.ts)) deja de mostrar como
+  burbuja flotante a las reglas con `plannedTankRuleId` seteado (ya están "adentro" de un
+  tanque). `computePlannedExpenses` es la nueva fuente del Bolsillo (`PocketWidget`) en
+  `asignar-gastos.tsx`: gastos vencidos con tanque planificado pero sin confirmar.
+- El gasto **sigue** apareciendo en Confirmar (`computePendingConfirmations` no cambia su
+  condición de `nextDueDate < ahora`) hasta que el usuario lo confirma ahí.
+
+### Nivel del tanque reserva lo planificado
+- `computeIncomeTanks` resta del `level` disponible, además de lo ya gastado
+  (transacciones reales), el `estimatedAmount` de los gastos planificados-pero-no-
+  confirmados de ese tanque (`nextDueDate < ahora && plannedTankRuleId === tank.ruleId`).
+- No hay doble descuento: al confirmarse, `nextDueDate` avanza y la regla sale de ese
+  filtro; el descuento pasa a salir de la transacción real recién creada.
+
+### Confirmar ya sabe qué tanque usar
+- `confirmRecurringOccurrences` crea la(s) transacción(es) reales y, si se usó un tanque,
+  además persiste `plannedTankRuleId` en la regla — así el próximo ciclo ya vuelve a
+  aparecer con el mismo tanque preseleccionado en Confirmar, sin tener que reasignar a
+  mano en `asignar-gastos`.
+- `findRememberedTankId` (búsqueda en el historial de transacciones) queda solo como
+  *fallback* para reglas asignadas antes de esta migración, sin `plannedTankRuleId`.
+
+### Sacar del tanque
+- Como asignar nunca creó una transacción, `unassignExpenseFromTank` solo limpia
+  `plannedTankRuleId`. Ya no hace falta revertir `nextDueDate` ni manejar el caso de
+  "período ya pagado" (`unassignTransactionFromIncomeTank`, eliminada) — esa complejidad
+  desaparece junto con la transacción prematura que la causaba.
+
+### Archivos
+- [src/db/schema.ts](src/db/schema.ts) — columna `plannedTankRuleId` en `recurringRules`,
+  migración `0009_nappy_eternals.sql`.
+- [src/db/queries/recurring-rules.ts](src/db/queries/recurring-rules.ts) —
+  `updatePlannedTankRuleId`.
+- [src/db/queries/tanks.ts](src/db/queries/tanks.ts) — `computePlannedExpenses`,
+  reserva en `computeIncomeTanks`, `plannedTankRuleId` en `PendingConfirmation`.
+- [src/db/queries/transactions.ts](src/db/queries/transactions.ts) —
+  `assignExpenseToTank`, `splitAndAssignExpenseToTank`, `unassignExpenseFromTank`.
+- [src/app/asignar-gastos.tsx](src/app/asignar-gastos.tsx), [src/app/(tabs)/index.tsx](src/app/(tabs)/index.tsx),
+  [src/app/(tabs)/confirmar.tsx](src/app/(tabs)/confirmar.tsx).

@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { type AnySQLiteColumn, integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 export const sections = sqliteTable('sections', {
   id: integer('id').primaryKey({ autoIncrement: true }),
@@ -39,6 +39,12 @@ export const recurringRules = sqliteTable('recurring_rules', {
   isVariableAmount: integer('is_variable_amount', { mode: 'boolean' }).notNull().default(false),
   estimatedAmount: real('estimated_amount'),
   nextDueDate: integer('next_due_date', { mode: 'timestamp' }).notNull(),
+  // Solo aplica a reglas kind='expense': tanque de ingreso del que va a salir este
+  // gasto una vez confirmado. Se setea al "asignar" en asignar-gastos/Home (planificar,
+  // sin crear transacción todavía) y se lee en Confirmar para no volver a preguntar.
+  plannedTankRuleId: integer('planned_tank_rule_id').references(
+    (): AnySQLiteColumn => recurringRules.id,
+  ),
   reminderEnabled: integer('reminder_enabled', { mode: 'boolean' }).notNull().default(true),
   archivedAt: integer('archived_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' })

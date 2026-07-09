@@ -1,15 +1,15 @@
-import { and, count, desc, eq, gte, isNotNull, isNull, like, lte } from 'drizzle-orm';
+import { and, count, desc, eq, gte, isNull, like, lte } from 'drizzle-orm';
 
 import { db } from '@/db/client';
-import { transactions, recurringRules } from '@/db/schema';
+import { transactions } from '@/db/schema';
 import {
   archiveRecurringRule,
   createRecurringRule,
   updateNextDueDate,
+  updatePlannedTankRuleId,
   type CustomIntervalUnit,
   type RecurringFrequency,
 } from '@/db/queries/recurring-rules';
-import { advanceDate, stepBack } from '@/db/queries/tanks';
 
 export type TransactionKind = (typeof transactions.$inferSelect)['kind'];
 
@@ -80,97 +80,25 @@ export function assignTransactionToIncomeTank(transactionId: number, incomeRuleI
     .returning();
 }
 
-// Sacar un gasto del tanque: si viene de una regla recurrente (allocateExpenseToIncomeTank
-// ya adelantó nextDueDate al asignarlo), hay que revertir ese avance para que el gasto
-// vuelva a aparecer como burbuja pendiente en "asignar gastos", y borrar la transacción
-// para no dejarla huérfana (contando como gasto libre y duplicándose si se reasigna).
-//
-// Ojo: la misma regla puede haber sido pagada de nuevo después (vía otra asignación o
-// vía "Confirmar", que también puede alocar a un tanque y procesar varios ciclos vencidos
-// de una sola vez). Si esta transacción no es la última registrada para la regla, ese
-// período posterior ya está pagado y revertir nextDueDate lo dejaría "pendiente" de nuevo
-// (doble pago / calendario roto). En ese caso solo se desvincula del tanque sin tocar la regla.
-export async function unassignTransactionFromIncomeTank(
-  transactionId: number,
-): Promise<{ periodAlreadySettled: boolean }> {
-  const [transaction] = await db.select().from(transactions).where(eq(transactions.id, transactionId));
-
-  if (transaction && transaction.kind === 'expense' && transaction.recurringRuleId !== null) {
-    const [latest] = await db
-      .select({ id: transactions.id })
-      .from(transactions)
-      .where(eq(transactions.recurringRuleId, transaction.recurringRuleId))
-      .orderBy(desc(transactions.id))
-      .limit(1);
-
-    if (latest?.id === transaction.id) {
-      const [rule] = await db
-        .select()
-        .from(recurringRules)
-        .where(eq(recurringRules.id, transaction.recurringRuleId));
-
-      if (rule && !rule.archivedAt) {
-        await updateNextDueDate(
-          rule.id,
-          stepBack(rule.nextDueDate, rule.frequency, rule.customIntervalValue, rule.customIntervalUnit),
-        );
-        await db.delete(transactions).where(eq(transactions.id, transactionId));
-        return { periodAlreadySettled: false };
-      }
-    } else {
-      await db
-        .update(transactions)
-        .set({ allocatedIncomeRuleId: null })
-        .where(eq(transactions.id, transactionId));
-      return { periodAlreadySettled: true };
-    }
-  }
-
-  await db
-    .update(transactions)
-    .set({ allocatedIncomeRuleId: null })
-    .where(eq(transactions.id, transactionId));
-  return { periodAlreadySettled: false };
+// Asignar un gasto recurrente a un tanque en asignar-gastos/Home es solo planificar de
+// dónde va a salir la plata: no crea transacción ni avanza nextDueDate. El gasto sigue
+// pendiente de confirmar (visible en la pestaña Confirmar) hasta que el usuario lo
+// confirma ahí de verdad.
+export async function assignExpenseToTank(input: { expenseRuleId: number; incomeRuleId: number }) {
+  return updatePlannedTankRuleId(input.expenseRuleId, input.incomeRuleId);
 }
 
-export function listAssignedExpenseTransactions() {
-  return db
-    .select()
-    .from(transactions)
-    .where(and(eq(transactions.kind, 'expense'), isNotNull(transactions.allocatedIncomeRuleId)))
-    .orderBy(desc(transactions.occurredAt));
+// Sacar un gasto del tanque en el Bolsillo: como asignar nunca creó una transacción,
+// alcanza con limpiar la planificación para que vuelva a flotar como burbuja pendiente.
+export function unassignExpenseFromTank(expenseRuleId: number) {
+  return updatePlannedTankRuleId(expenseRuleId, null);
 }
 
-export async function allocateExpenseToIncomeTank(input: {
-  expenseRuleId: number;
-  incomeRuleId: number;
-  sectionId: number;
-  amount: number;
-  frequency: RecurringFrequency;
-  customIntervalValue?: number | null;
-  customIntervalUnit?: CustomIntervalUnit | null;
-  nextDueDate: Date;
-  description?: string;
-}) {
-  const [transaction] = await createTransaction({
-    sectionId: input.sectionId,
-    amount: input.amount,
-    kind: 'expense',
-    description: input.description,
-    occurredAt: new Date(),
-    recurringRuleId: input.expenseRuleId,
-    allocatedIncomeRuleId: input.incomeRuleId,
-  });
-
-  await updateNextDueDate(
-    input.expenseRuleId,
-    advanceDate(input.nextDueDate, input.frequency, input.customIntervalValue, input.customIntervalUnit),
-  );
-
-  return transaction;
-}
-
-export async function splitAndAllocateExpenseToIncomeTank(input: {
+// El disponible del tanque no alcanza para todo el gasto: se parte la regla recurrente en
+// dos desde este ciclo. La parte "continuada" (allocatedAmount) queda planificada en el
+// tanque elegido sin confirmar todavía; la parte "remanente" queda sin asignar, vencida,
+// para que el usuario la asigne a otro tanque.
+export async function splitAndAssignExpenseToTank(input: {
   expenseRuleId: number;
   incomeRuleId: number;
   sectionId: number;
@@ -193,12 +121,8 @@ export async function splitAndAllocateExpenseToIncomeTank(input: {
     customIntervalUnit: input.customIntervalUnit ?? null,
     isVariableAmount: false,
     estimatedAmount: input.allocatedAmount,
-    nextDueDate: advanceDate(
-      input.currentDueDate,
-      input.frequency,
-      input.customIntervalValue,
-      input.customIntervalUnit,
-    ),
+    nextDueDate: input.currentDueDate,
+    plannedTankRuleId: input.incomeRuleId,
   });
 
   await createRecurringRule({
@@ -213,17 +137,7 @@ export async function splitAndAllocateExpenseToIncomeTank(input: {
     nextDueDate: input.currentDueDate,
   });
 
-  const [transaction] = await createTransaction({
-    sectionId: input.sectionId,
-    amount: input.allocatedAmount,
-    kind: 'expense',
-    description: input.label,
-    occurredAt: new Date(),
-    recurringRuleId: continuedRule.id,
-    allocatedIncomeRuleId: input.incomeRuleId,
-  });
-
-  return transaction;
+  return continuedRule;
 }
 
 export async function confirmRecurringOccurrences(input: {
@@ -250,6 +164,12 @@ export async function confirmRecurringOccurrences(input: {
   }
 
   await updateNextDueDate(input.ruleId, input.nextDueDate);
+
+  // Recordar el tanque usado para este ciclo como plan del próximo: así el gasto ya
+  // aparece con el tanque preseleccionado la próxima vez, sin tener que reasignarlo.
+  if (input.kind === 'expense' && input.allocatedIncomeRuleId) {
+    await updatePlannedTankRuleId(input.ruleId, input.allocatedIncomeRuleId);
+  }
 
   return created;
 }

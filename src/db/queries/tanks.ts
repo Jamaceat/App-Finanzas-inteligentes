@@ -134,6 +134,7 @@ type Rule = {
   estimatedAmount: number | null;
   nextDueDate: Date;
   archivedAt: Date | null;
+  plannedTankRuleId: number | null;
 };
 
 type Transaction = {
@@ -163,6 +164,25 @@ export type IncomeTank = {
 };
 
 export function computeIncomeTanks(rules: Rule[], transactions: Transaction[]): IncomeTank[] {
+  const now = new Date();
+  // Gastos ya planificados (asignados a un tanque) pero todavía no confirmados: se
+  // descuentan del nivel disponible como si ya estuvieran comprometidos, aunque todavía
+  // no exista una transacción real. En cuanto se confirman, nextDueDate avanza y salen
+  // de este filtro, así que no se descuentan dos veces (la transacción real ya creada
+  // pasa a contar vía `allocated`).
+  const plannedByTank = new Map<number, number>();
+  for (const rule of rules) {
+    if (
+      rule.kind === 'expense' &&
+      !rule.archivedAt &&
+      rule.plannedTankRuleId !== null &&
+      rule.nextDueDate < now
+    ) {
+      const current = plannedByTank.get(rule.plannedTankRuleId) ?? 0;
+      plannedByTank.set(rule.plannedTankRuleId, current + (rule.estimatedAmount ?? 0));
+    }
+  }
+
   return rules
     .filter((rule) => rule.kind === 'income' && !rule.archivedAt)
     .map((rule) => {
@@ -177,12 +197,13 @@ export function computeIncomeTanks(rules: Rule[], transactions: Transaction[]): 
         (t) => t.kind === 'expense' && t.allocatedIncomeRuleId === rule.id,
         window,
       );
+      const reserved = plannedByTank.get(rule.id) ?? 0;
       return {
         ruleId: rule.id,
         sectionId: rule.sectionId,
         label: rule.label,
         capacity: rule.isVariableAmount ? received : (rule.estimatedAmount ?? received),
-        level: Math.max(0, received - allocated),
+        level: Math.max(0, received - allocated - reserved),
       };
     });
 }
@@ -304,7 +325,13 @@ export type PendingExpense = {
 export function computePendingExpenses(rules: Rule[]): PendingExpense[] {
   const now = new Date();
   return rules
-    .filter((rule) => rule.kind === 'expense' && !rule.archivedAt && rule.nextDueDate < now)
+    .filter(
+      (rule) =>
+        rule.kind === 'expense' &&
+        !rule.archivedAt &&
+        rule.nextDueDate < now &&
+        rule.plannedTankRuleId === null,
+    )
     .map((rule) => ({
       ruleId: rule.id,
       sectionId: rule.sectionId,
@@ -315,6 +342,37 @@ export function computePendingExpenses(rules: Rule[]): PendingExpense[] {
       customIntervalValue: rule.customIntervalValue,
       customIntervalUnit: rule.customIntervalUnit,
       nextDueDate: rule.nextDueDate,
+    }));
+}
+
+export type PlannedExpense = {
+  ruleId: number;
+  sectionId: number;
+  label: string;
+  estimatedAmount: number | null;
+  nextDueDate: Date;
+  plannedTankRuleId: number;
+};
+
+// Gastos ya asignados a un tanque (arrastrados en asignar-gastos/Home) pero todavía sin
+// confirmar: son los que se muestran "adentro" del tanque en el Bolsillo.
+export function computePlannedExpenses(rules: Rule[]): PlannedExpense[] {
+  const now = new Date();
+  return rules
+    .filter(
+      (rule) =>
+        rule.kind === 'expense' &&
+        !rule.archivedAt &&
+        rule.nextDueDate < now &&
+        rule.plannedTankRuleId !== null,
+    )
+    .map((rule) => ({
+      ruleId: rule.id,
+      sectionId: rule.sectionId,
+      label: rule.label,
+      estimatedAmount: rule.estimatedAmount,
+      nextDueDate: rule.nextDueDate,
+      plannedTankRuleId: rule.plannedTankRuleId as number,
     }));
 }
 
@@ -330,6 +388,7 @@ export type PendingConfirmation = {
   customIntervalUnit: CustomIntervalUnit | null;
   occurrences: Date[];
   nextDueAfter: Date;
+  plannedTankRuleId: number | null;
 };
 
 export function computePendingConfirmations(
@@ -360,6 +419,7 @@ export function computePendingConfirmations(
         customIntervalUnit: rule.customIntervalUnit,
         occurrences,
         nextDueAfter: current,
+        plannedTankRuleId: rule.plannedTankRuleId,
       };
     });
 }

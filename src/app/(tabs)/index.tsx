@@ -53,7 +53,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { listActiveRecurringRules } from '@/db/queries/recurring-rules';
 import { listActiveSections } from '@/db/queries/sections';
 import { watchAppSettingsRow } from '@/db/queries/settings';
-import { listTransactions, allocateExpenseToIncomeTank } from '@/db/queries/transactions';
+import { listTransactions, assignExpenseToTank } from '@/db/queries/transactions';
 import {
   addInterval,
   computeFreeCashTank,
@@ -217,27 +217,19 @@ export default function HomeScreen() {
   );
 
   async function handleAllocate(expense: PendingExpense, tank: IncomeTank) {
-    const amount = expense.estimatedAmount ?? 0;
-    await allocateExpenseToIncomeTank({
+    await assignExpenseToTank({
       expenseRuleId: expense.ruleId,
       incomeRuleId: tank.ruleId,
-      sectionId: expense.sectionId,
-      amount,
-      frequency: expense.frequency,
-      customIntervalValue: expense.customIntervalValue,
-      customIntervalUnit: expense.customIntervalUnit,
-      nextDueDate: expense.nextDueDate,
-      description: expense.label,
     });
   }
 
   function confirmAllocate(expense: PendingExpense, tank: IncomeTank) {
     Alert.alert(
-      'Confirmar pago',
-      `¿Pagar "${expense.label}" desde el tanque "${tank.label}"?`,
+      'Asignar gasto',
+      `¿Asignar "${expense.label}" al tanque "${tank.label}"? Vas a poder confirmar el pago después en la pestaña Confirmar.`,
       [
         { text: 'Cancelar', style: 'cancel' },
-        { text: 'Confirmar', onPress: () => handleAllocate(expense, tank) },
+        { text: 'Asignar', onPress: () => handleAllocate(expense, tank) },
       ],
     );
   }

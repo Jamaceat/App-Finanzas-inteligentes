@@ -1,0 +1,1 @@
+ALTER TABLE `recurring_rules` ADD `planned_tank_rule_id` integer REFERENCES recurring_rules(id);

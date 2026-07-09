@@ -158,8 +158,11 @@ function ConfirmationModal({
   const theme = useTheme();
   const isExpense = confirmation.kind === 'expense';
   const rememberedTankId = useMemo(
-    () => (isExpense ? findRememberedTankId(confirmation.ruleId, transactions) : null),
-    [isExpense, confirmation.ruleId, transactions],
+    () =>
+      isExpense
+        ? (confirmation.plannedTankRuleId ?? findRememberedTankId(confirmation.ruleId, transactions))
+        : null,
+    [isExpense, confirmation.plannedTankRuleId, confirmation.ruleId, transactions],
   );
   const needsTankChoice = isExpense && rememberedTankId === null;
 

@@ -57,12 +57,21 @@ export function createRecurringRule(input: {
   estimatedAmount?: number;
   nextDueDate: Date;
   reminderEnabled?: boolean;
+  plannedTankRuleId?: number | null;
 }) {
   return db.insert(recurringRules).values(input).returning();
 }
 
 export function updateNextDueDate(id: number, nextDueDate: Date) {
   return db.update(recurringRules).set({ nextDueDate }).where(eq(recurringRules.id, id)).returning();
+}
+
+export function updatePlannedTankRuleId(id: number, plannedTankRuleId: number | null) {
+  return db
+    .update(recurringRules)
+    .set({ plannedTankRuleId })
+    .where(eq(recurringRules.id, id))
+    .returning();
 }
 
 export function updateRecurringRule(

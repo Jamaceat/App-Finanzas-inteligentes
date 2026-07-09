@@ -1,6 +1,6 @@
 import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
 import { useEffect, useMemo, useState } from 'react';
-import { StyleSheet, View, Pressable, useWindowDimensions, BackHandler, Alert } from 'react-native';
+import { StyleSheet, View, Pressable, useWindowDimensions, BackHandler } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useNavigation } from 'expo-router';
@@ -28,13 +28,17 @@ import {
 import { listActiveRecurringRules } from '@/db/queries/recurring-rules';
 import { DEFAULT_SECTION_NAME, listActiveSections } from '@/db/queries/sections';
 import {
-  allocateExpenseToIncomeTank,
-  listAssignedExpenseTransactions,
+  assignExpenseToTank,
   listTransactions,
-  splitAndAllocateExpenseToIncomeTank,
-  unassignTransactionFromIncomeTank,
+  splitAndAssignExpenseToTank,
+  unassignExpenseFromTank,
 } from '@/db/queries/transactions';
-import { computeIncomeTanks, computePendingExpenses, type PendingExpense } from '@/db/queries/tanks';
+import {
+  computeIncomeTanks,
+  computePendingExpenses,
+  computePlannedExpenses,
+  type PendingExpense,
+} from '@/db/queries/tanks';
 import { watchAppSettingsRow } from '@/db/queries/settings';
 import { useBubbleFrontOrder } from '@/hooks/use-bubble-front-order';
 import { useTheme } from '@/hooks/use-theme';
@@ -85,7 +89,6 @@ export default function AsignarGastosScreen() {
   const theme = useTheme();
   const { data: rules } = useLiveQuery(listActiveRecurringRules());
   const { data: transactions } = useLiveQuery(listTransactions());
-  const { data: assignedTransactions } = useLiveQuery(listAssignedExpenseTransactions());
   const { data: sections } = useLiveQuery(listActiveSections());
   const { data: settingsRows } = useLiveQuery(watchAppSettingsRow());
   const { width, height } = useWindowDimensions();
@@ -128,41 +131,33 @@ export default function AsignarGastosScreen() {
     [incomeTanks],
   );
 
+  const plannedExpenses = useMemo(() => computePlannedExpenses(rules), [rules]);
   const pocketExpenses = useMemo(
     () =>
-      (assignedTransactions || [])
-        .filter((transaction) => transaction.allocatedIncomeRuleId !== null)
-        .map((transaction) => ({
-          id: transaction.id,
-          label: transaction.description || 'Gasto',
-          amount: transaction.amount,
-          occurredAt: transaction.occurredAt,
-          incomeRuleId: transaction.allocatedIncomeRuleId as number,
-        })),
-    [assignedTransactions],
+      plannedExpenses.map((expense) => ({
+        id: expense.ruleId,
+        label: expense.label,
+        amount: expense.estimatedAmount ?? 0,
+        occurredAt: expense.nextDueDate,
+        incomeRuleId: expense.plannedTankRuleId,
+      })),
+    [plannedExpenses],
   );
 
   async function handleAllocateRule(expense: PendingExpense, incomeRuleId: number, allocatedAmount: number) {
     const fullAmount = expense.estimatedAmount ?? 0;
 
     if (allocatedAmount >= fullAmount) {
-      await allocateExpenseToIncomeTank({
+      await assignExpenseToTank({
         expenseRuleId: expense.ruleId,
         incomeRuleId,
-        sectionId: expense.sectionId,
-        amount: fullAmount,
-        frequency: expense.frequency,
-        customIntervalValue: expense.customIntervalValue,
-        customIntervalUnit: expense.customIntervalUnit,
-        nextDueDate: expense.nextDueDate,
-        description: expense.label,
       });
       return;
     }
 
     // El disponible del tanque no alcanza para todo el gasto: se parte la
-    // regla recurrente en dos desde este ciclo (ver splitAndAllocateExpenseToIncomeTank).
-    await splitAndAllocateExpenseToIncomeTank({
+    // regla recurrente en dos desde este ciclo (ver splitAndAssignExpenseToTank).
+    await splitAndAssignExpenseToTank({
       expenseRuleId: expense.ruleId,
       incomeRuleId,
       sectionId: expense.sectionId,
@@ -478,15 +473,7 @@ export default function AsignarGastosScreen() {
         <PocketWidget
           tanks={tanks}
           expenses={pocketExpenses}
-          onUnassign={async (expenseId) => {
-            const { periodAlreadySettled } = await unassignTransactionFromIncomeTank(expenseId);
-            if (periodAlreadySettled) {
-              Alert.alert(
-                'Este período ya está pagado',
-                'Se sacó del tanque, pero como ya se pagó un ciclo posterior de este gasto recurrente no puede volver a aparecer para reasignar: eso rompería el calendario del próximo período.',
-              );
-            }
-          }}
+          onUnassign={(expenseId) => unassignExpenseFromTank(expenseId)}
           vibrationEnabled={vibrationEnabled}
           onCollapsedChange={setIsWidgetCollapsed}
         />
