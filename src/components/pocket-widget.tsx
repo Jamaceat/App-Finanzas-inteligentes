@@ -67,6 +67,8 @@ export type PocketTank = {
   ruleId: number;
   label: string;
   color: string;
+  level: number;
+  capacity: number;
 };
 
 export type PocketExpense = {
@@ -357,10 +359,13 @@ export function PocketWidget({
               </ThemedText>
             )}
             {selectedTank && (
-              <ThemedText type="small" themeColor="textSecondary" style={styles.fullscreenSubtitle}>
-                Gastos asignados a {selectedTank.label} · {sortedTankExpenses.length} ·{' '}
-                {formatCompactCurrency(tankExpenseTotal)}
-              </ThemedText>
+              <>
+                <ThemedText type="small" themeColor="textSecondary" style={styles.fullscreenSubtitle}>
+                  Gastos asignados a {selectedTank.label} · {sortedTankExpenses.length} ·{' '}
+                  {formatCompactCurrency(tankExpenseTotal)}
+                </ThemedText>
+                <TankStatusBar tank={selectedTank} />
+              </>
             )}
 
             <View style={styles.sortRow}>
@@ -583,6 +588,33 @@ function PeekDot({
         },
       ]}
     />
+  );
+}
+
+function TankStatusBar({ tank }: { tank: PocketTank }) {
+  const theme = useTheme();
+  const capacity = Math.max(tank.capacity, 1);
+  const level = Math.max(0, tank.level);
+  const ratio = Math.max(0, Math.min(1, level / capacity));
+  const percentage = Math.round(ratio * 100);
+
+  return (
+    <View style={styles.tankStatusContainer}>
+      <View style={[styles.tankStatusTrack, { backgroundColor: theme.backgroundElement }]}>
+        <View
+          style={[
+            styles.tankStatusFill,
+            { width: `${ratio * 100}%`, backgroundColor: tank.color },
+          ]}
+        />
+      </View>
+      <View style={styles.tankStatusDetails}>
+        <ThemedText type="small" themeColor="textSecondary">
+          Disponible: {formatCurrency(level)} de {formatCurrency(capacity)}
+        </ThemedText>
+        <ThemedText type="smallBold">{percentage}%</ThemedText>
+      </View>
+    </View>
   );
 }
 
@@ -834,6 +866,25 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
     paddingHorizontal: Spacing.four,
     paddingTop: Spacing.two,
+  },
+  tankStatusContainer: {
+    paddingHorizontal: Spacing.four,
+    paddingTop: Spacing.two,
+    gap: Spacing.one,
+  },
+  tankStatusTrack: {
+    height: 10,
+    borderRadius: 5,
+    overflow: 'hidden',
+  },
+  tankStatusFill: {
+    height: '100%',
+    borderRadius: 5,
+  },
+  tankStatusDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   bubbleField: {
     flex: 1,
