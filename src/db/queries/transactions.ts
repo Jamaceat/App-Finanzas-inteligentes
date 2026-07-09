@@ -134,40 +134,45 @@ export async function splitAndAssignExpenseToTank(input: {
 }) {
   // Un solo commit para archive + 2 creates: una sola notificación de cambio.
   return db.transaction((tx) => {
-    archiveRecurringRule(input.expenseRuleId, tx).run();
+    try {
+      archiveRecurringRule(input.expenseRuleId, tx).run();
 
-    const [continuedRule] = createRecurringRule(
-      {
-        sectionId: input.sectionId,
-        label: input.label,
-        kind: 'expense',
-        frequency: input.frequency,
-        customIntervalValue: input.customIntervalValue ?? null,
-        customIntervalUnit: input.customIntervalUnit ?? null,
-        isVariableAmount: false,
-        estimatedAmount: input.allocatedAmount,
-        nextDueDate: input.currentDueDate,
-        plannedTankRuleId: input.incomeRuleId,
-      },
-      tx,
-    ).all();
+      const [continuedRule] = createRecurringRule(
+        {
+          sectionId: input.sectionId,
+          label: input.label,
+          kind: 'expense',
+          frequency: input.frequency,
+          customIntervalValue: input.customIntervalValue ?? null,
+          customIntervalUnit: input.customIntervalUnit ?? null,
+          isVariableAmount: false,
+          estimatedAmount: input.allocatedAmount,
+          nextDueDate: input.currentDueDate,
+          plannedTankRuleId: input.incomeRuleId,
+        },
+        tx,
+      ).all();
 
-    createRecurringRule(
-      {
-        sectionId: input.sectionId,
-        label: input.label,
-        kind: 'expense',
-        frequency: input.frequency,
-        customIntervalValue: input.customIntervalValue ?? null,
-        customIntervalUnit: input.customIntervalUnit ?? null,
-        isVariableAmount: false,
-        estimatedAmount: input.remainderAmount,
-        nextDueDate: input.currentDueDate,
-      },
-      tx,
-    ).run();
+      createRecurringRule(
+        {
+          sectionId: input.sectionId,
+          label: input.label,
+          kind: 'expense',
+          frequency: input.frequency,
+          customIntervalValue: input.customIntervalValue ?? null,
+          customIntervalUnit: input.customIntervalUnit ?? null,
+          isVariableAmount: false,
+          estimatedAmount: input.remainderAmount,
+          nextDueDate: input.currentDueDate,
+        },
+        tx,
+      ).run();
 
-    return continuedRule;
+      return continuedRule;
+    } catch (err) {
+      console.error("splitAndAssignExpenseToTank transaction error:", err);
+      throw err;
+    }
   });
 }
 

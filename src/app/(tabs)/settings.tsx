@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
   useAnimatedStyle,
@@ -20,6 +20,7 @@ import {
   updateRestrictPastStartDates,
   updateTransactionsPageSize,
   updateAllowPartialTankAssignment,
+  resetAllData,
   type TankMaxRenewalUnit,
 } from '@/db/queries/settings';
 import { useAppSettingsRows } from '@/providers/app-data';
@@ -61,6 +62,7 @@ export default function SettingsScreen() {
               <VibrationForm enabled={row.vibrationEnabled} />
               <RestrictPastDatesForm enabled={row.restrictPastStartDates} />
               <AllowPartialTankAssignmentForm enabled={row.allowPartialTankAssignment} />
+              <ResetDataForm />
             </View>
           )}
         </ScrollView>
@@ -310,6 +312,90 @@ function Chip({
     </Pressable>
   );
 }
+function ResetDataForm() {
+  const [modalVisible, setModalVisible] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  async function handleReset() {
+    setLoading(true);
+    try {
+      await resetAllData();
+      setModalVisible(false);
+    } catch (error) {
+      console.error('Error resetting database:', error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <>
+      <ThemedView type="backgroundElement" style={styles.form}>
+        <ThemedText type="smallBold" style={{ color: '#E5484D' }}>Zona de Peligro</ThemedText>
+        <ThemedText type="small" themeColor="textSecondary">
+          Elimina de forma irreversible todos los ingresos, gastos, reglas recurrentes, tanques y metas de ahorro. Se mantendrá la sección por defecto "General".
+        </ThemedText>
+
+        <Pressable onPress={() => setModalVisible(true)} style={({ pressed }) => pressed && styles.pressed}>
+          <View style={[styles.submitButton, { backgroundColor: '#E5484D' }]}>
+            <ThemedText type="smallBold" style={{ color: '#ffffff' }}>Reiniciar todos los datos</ThemedText>
+          </View>
+        </Pressable>
+      </ThemedView>
+
+      <Modal
+        visible={modalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !loading && setModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <ThemedView type="backgroundElement" style={styles.modalCard}>
+            <ScrollView contentContainerStyle={styles.modalScrollContent} keyboardShouldPersistTaps="handled">
+              <ThemedText type="smallBold" style={[styles.modalTitle, { color: '#E5484D' }]}>
+                ¿Confirmar reinicio de datos?
+              </ThemedText>
+              
+              <ThemedText type="small" themeColor="textSecondary">
+                Esta acción es irreversible y borrará permanentemente:
+              </ThemedText>
+
+              <View style={{ gap: Spacing.one, paddingLeft: Spacing.two }}>
+                <ThemedText type="small">• Todos los movimientos de ingresos y gastos.</ThemedText>
+                <ThemedText type="small">• Todas las reglas recurrentes y tanques.</ThemedText>
+                <ThemedText type="small">• Todos los objetivos de ahorro.</ThemedText>
+                <ThemedText type="small">• Todas las secciones / categorías creadas por ti.</ThemedText>
+              </View>
+
+              <View style={styles.modalActions}>
+                <Pressable
+                  onPress={() => setModalVisible(false)}
+                  disabled={loading}
+                  style={({ pressed }) => [pressed && styles.pressed, loading && styles.disabledButton]}
+                >
+                  <ThemedView type="background" style={styles.modalButton}>
+                    <ThemedText type="small">Cancelar</ThemedText>
+                  </ThemedView>
+                </Pressable>
+
+                <Pressable
+                  onPress={handleReset}
+                  disabled={loading}
+                  style={({ pressed }) => [pressed && styles.pressed, loading && styles.disabledButton]}
+                >
+                  <View style={[styles.modalButton, { backgroundColor: '#E5484D', flexDirection: 'row', alignItems: 'center', gap: Spacing.one }]}>
+                    {loading && <ActivityIndicator size="small" color="#ffffff" />}
+                    <ThemedText type="smallBold" style={{ color: '#ffffff' }}>Sí, reiniciar todo</ThemedText>
+                  </View>
+                </Pressable>
+              </View>
+            </ScrollView>
+          </ThemedView>
+        </View>
+      </Modal>
+    </>
+  );
+}
 
 const styles = StyleSheet.create({
   container: {
@@ -392,5 +478,40 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 2,
     elevation: 2,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: Spacing.four,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 480,
+    maxHeight: '85%',
+    borderRadius: Spacing.four,
+  },
+  modalScrollContent: {
+    padding: Spacing.four,
+    gap: Spacing.three,
+  },
+  modalTitle: {
+    fontSize: 17,
+    lineHeight: 22,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: Spacing.two,
+    marginTop: Spacing.two,
+  },
+  modalButton: {
+    paddingVertical: Spacing.two,
+    paddingHorizontal: Spacing.four,
+    borderRadius: Spacing.three,
+  },
+  disabledButton: {
+    opacity: 0.4,
   },
 });

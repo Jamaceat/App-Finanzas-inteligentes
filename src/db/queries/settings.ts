@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 
 import { DEFAULT_SIMULATION_OCCURRENCES } from '@/constants/constants';
 import { db } from '@/db/client';
-import { appSettings } from '@/db/schema';
+import { appSettings, transactions, recurringRules, savingsGoals, sections } from '@/db/schema';
 
 export type TankMaxRenewalUnit = (typeof appSettings.$inferSelect)['tankMaxRenewalUnit'];
 
@@ -147,4 +147,23 @@ export async function updateAllowPartialTankAssignment(enabled: boolean): Promis
     .where(eq(appSettings.id, row.id))
     .returning();
   return updated;
+}
+
+export async function resetAllData() {
+  return db.transaction((tx) => {
+    tx.delete(transactions).run();
+    tx.delete(recurringRules).run();
+    tx.delete(savingsGoals).run();
+    tx.delete(sections).run();
+
+    // Recreate default section
+    tx.insert(sections)
+      .values({
+        name: 'General',
+        icon: 'house',
+        color: '#60646C',
+        kind: 'both',
+      })
+      .run();
+  });
 }
