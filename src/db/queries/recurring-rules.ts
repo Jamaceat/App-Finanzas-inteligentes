@@ -118,7 +118,7 @@ export function archiveRecurringRule(id: number, executor: DbExecutor = db) {
 // versión. Un solo commit: una sola notificación de cambio para los useLiveQuery montados.
 export async function replaceRecurringRule(archiveId: number, input: CreateRecurringRuleInput) {
   return db.transaction((tx) => {
-    archiveRecurringRule(archiveId, tx).run();
+    archiveRecurringRule(archiveId, tx).all();
     const [created] = createRecurringRule(input, tx).all();
     return created;
   });

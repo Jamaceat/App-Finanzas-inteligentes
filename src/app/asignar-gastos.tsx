@@ -40,6 +40,7 @@ import {
   computeIncomeTanks,
   computePendingExpenses,
   computePlannedExpenses,
+  getCycleWindow,
   type PendingExpense,
 } from '@/db/queries/tanks';
 import { useBubbleFrontOrder } from '@/hooks/use-bubble-front-order';
@@ -134,17 +135,43 @@ export default function AsignarGastosScreen() {
   );
 
   const plannedExpenses = useMemo(() => computePlannedExpenses(rules), [rules]);
-  const pocketExpenses = useMemo(
-    () =>
-      plannedExpenses.map((expense) => ({
-        id: expense.ruleId,
-        label: expense.label,
-        amount: expense.estimatedAmount ?? 0,
-        occurredAt: expense.nextDueDate,
-        incomeRuleId: expense.plannedTankRuleId,
-      })),
-    [plannedExpenses],
-  );
+  const pocketExpenses = useMemo(() => {
+    const planned = plannedExpenses.map((expense) => ({
+      id: expense.ruleId,
+      label: expense.label,
+      amount: expense.estimatedAmount ?? 0,
+      occurredAt: expense.nextDueDate,
+      incomeRuleId: expense.plannedTankRuleId,
+      isConfirmed: false,
+    }));
+
+    const activeIncomeRules = rules.filter((r) => r.kind === 'income' && !r.archivedAt);
+    const confirmed: typeof planned = [];
+
+    for (const rule of activeIncomeRules) {
+      const window = getCycleWindow(rule);
+      const allocatedTransactions = transactions.filter(
+        (t) =>
+          t.kind === 'expense' &&
+          t.allocatedIncomeRuleId === rule.id &&
+          new Date(t.occurredAt) >= window.start &&
+          new Date(t.occurredAt) < window.end,
+      );
+
+      for (const t of allocatedTransactions) {
+        confirmed.push({
+          id: -t.id, // Negative to avoid collision with ruleId
+          label: t.description || rule.label,
+          amount: t.amount,
+          occurredAt: new Date(t.occurredAt),
+          incomeRuleId: rule.id,
+          isConfirmed: true,
+        });
+      }
+    }
+
+    return [...planned, ...confirmed];
+  }, [plannedExpenses, rules, transactions]);
 
   async function handleAllocateRule(expense: PendingExpense, incomeRuleId: number, allocatedAmount: number) {
     const fullAmount = expense.estimatedAmount ?? 0;

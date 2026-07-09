@@ -47,11 +47,13 @@ export function listTransactions(
 export function listTankTransactions() {
   return db
     .select({
+      id: transactions.id,
       amount: transactions.amount,
       kind: transactions.kind,
       occurredAt: transactions.occurredAt,
       recurringRuleId: transactions.recurringRuleId,
       allocatedIncomeRuleId: transactions.allocatedIncomeRuleId,
+      description: transactions.description,
     })
     .from(transactions)
     .orderBy(desc(transactions.occurredAt));
@@ -135,7 +137,7 @@ export async function splitAndAssignExpenseToTank(input: {
   // Un solo commit para archive + 2 creates: una sola notificación de cambio.
   return db.transaction((tx) => {
     try {
-      archiveRecurringRule(input.expenseRuleId, tx).run();
+      archiveRecurringRule(input.expenseRuleId, tx).all();
 
       const [continuedRule] = createRecurringRule(
         {
@@ -166,7 +168,7 @@ export async function splitAndAssignExpenseToTank(input: {
           nextDueDate: input.currentDueDate,
         },
         tx,
-      ).run();
+      ).all();
 
       return continuedRule;
     } catch (err) {
@@ -205,12 +207,12 @@ export async function confirmRecurringOccurrences(input: {
       created.push(transaction);
     }
 
-    updateNextDueDate(input.ruleId, input.nextDueDate, tx).run();
+    updateNextDueDate(input.ruleId, input.nextDueDate, tx).all();
 
     // Recordar el tanque usado para este ciclo como plan del próximo: así el gasto ya
     // aparece con el tanque preseleccionado la próxima vez, sin tener que reasignarlo.
     if (input.kind === 'expense' && input.allocatedIncomeRuleId) {
-      updatePlannedTankRuleId(input.ruleId, input.allocatedIncomeRuleId, tx).run();
+      updatePlannedTankRuleId(input.ruleId, input.allocatedIncomeRuleId, tx).all();
     }
 
     return created;

@@ -77,6 +77,7 @@ export type PocketExpense = {
   amount: number;
   occurredAt: Date;
   incomeRuleId: number;
+  isConfirmed?: boolean;
 };
 
 type WidgetState = 'collapsed' | 'corner' | 'fullscreen';
@@ -453,6 +454,7 @@ export function PocketWidget({
                           zIndex={getZIndex(`expense-${expense.id}`)}
                           onInteractionStart={bringToFront}
                           vibrationEnabled={vibrationEnabled}
+                          isConfirmed={expense.isConfirmed}
                         />
                       );
                     })}
@@ -469,7 +471,9 @@ export function PocketWidget({
             <ThemedText type="smallBold" themeColor="textSecondary">
               Detalle del gasto
             </ThemedText>
-            <ThemedText style={styles.detailLabel}>{selectedExpense?.label}</ThemedText>
+            <ThemedText style={styles.detailLabel}>
+              {selectedExpense?.isConfirmed ? `✓ ${selectedExpense?.label}` : selectedExpense?.label}
+            </ThemedText>
             <ThemedText style={[styles.detailAmount, { color: theme.text }]}>
               {selectedExpense ? formatCurrency(selectedExpense.amount) : ''}
             </ThemedText>
@@ -478,10 +482,12 @@ export function PocketWidget({
                 {new Date(selectedExpense.occurredAt).toLocaleDateString('es-AR')}
               </ThemedText>
             )}
-            <Pressable onPress={handleUnassign} style={styles.unassignButton}>
-              <SymbolView name={symbol('arrow.uturn.left', 'undo')} tintColor="#ffffff" size={16} />
-              <ThemedText style={styles.unassignButtonText}>Sacar del tanque</ThemedText>
-            </Pressable>
+            {!selectedExpense?.isConfirmed && (
+              <Pressable onPress={handleUnassign} style={styles.unassignButton}>
+                <SymbolView name={symbol('arrow.uturn.left', 'undo')} tintColor="#ffffff" size={16} />
+                <ThemedText style={styles.unassignButtonText}>Sacar del tanque</ThemedText>
+              </Pressable>
+            )}
             <Pressable onPress={() => setSelectedExpense(null)} style={styles.detailClose}>
               <ThemedText type="small" themeColor="textSecondary">
                 Cerrar
@@ -652,6 +658,7 @@ function FloatingBubbleComponent({
   zIndex,
   onInteractionStart,
   vibrationEnabled,
+  isConfirmed = false,
 }: {
   id: number;
   frontOrderKey: string;
@@ -669,6 +676,7 @@ function FloatingBubbleComponent({
   zIndex: number;
   onInteractionStart: (key: string) => void;
   vibrationEnabled: boolean;
+  isConfirmed?: boolean;
 }) {
   const wanderX = useSharedValue(0);
   const wanderY = useSharedValue(0);
@@ -780,11 +788,15 @@ function FloatingBubbleComponent({
             styles.bubble,
             { borderRadius: size / 2 },
             animatedStyle,
-            { backgroundColor: color, shadowColor: color },
+            {
+              backgroundColor: isConfirmed ? `${color}55` : color,
+              shadowColor: isConfirmed ? 'transparent' : color,
+              opacity: isConfirmed ? 0.6 : 1,
+            },
           ]}
         >
           <ThemedText type="smallBold" style={styles.bubbleLabel} numberOfLines={1}>
-            {label}
+            {isConfirmed ? `✓ ${label}` : label}
           </ThemedText>
           <ThemedText style={styles.bubbleSublabel} numberOfLines={1}>
             {sublabel}

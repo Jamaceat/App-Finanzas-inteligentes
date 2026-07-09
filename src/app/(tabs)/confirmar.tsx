@@ -151,13 +151,12 @@ function ConfirmationModal({
 }) {
   const theme = useTheme();
   const isExpense = confirmation.kind === 'expense';
-  const rememberedTankId = useMemo(
-    () =>
-      isExpense
-        ? (confirmation.plannedTankRuleId ?? findRememberedTankId(confirmation.ruleId, transactions))
-        : null,
-    [isExpense, confirmation.plannedTankRuleId, confirmation.ruleId, transactions],
-  );
+  const rememberedTankId = useMemo(() => {
+    if (!isExpense) return null;
+    const rawId = confirmation.plannedTankRuleId ?? findRememberedTankId(confirmation.ruleId, transactions);
+    const isActive = incomeTanks.some((tank) => tank.ruleId === rawId);
+    return isActive ? rawId : null;
+  }, [isExpense, confirmation.plannedTankRuleId, confirmation.ruleId, transactions, incomeTanks]);
   const needsTankChoice = isExpense && rememberedTankId === null;
 
   const [rows, setRows] = useState<OccurrenceRow[]>(() =>
@@ -180,6 +179,22 @@ function ConfirmationModal({
     setRows((prev) => prev.map((row, i) => (i === index ? { ...row, amountDigits: digits } : row)));
   }
 
+  const checkedRows = rows.filter((row) => row.checked);
+  const totalAmount = useMemo(() => {
+    return checkedRows.reduce(
+      (sum, row) => sum + Number(row.amountDigits || '0') / 100,
+      0,
+    );
+  }, [checkedRows]);
+
+  const activeTankId = isExpense ? selectedTankId : null;
+  const selectedTank = useMemo(() => {
+    if (activeTankId === null) return null;
+    return incomeTanks.find((tank) => tank.ruleId === activeTankId) ?? null;
+  }, [activeTankId, incomeTanks]);
+
+  const hasEnoughFunds = !isExpense || selectedTank === null || selectedTank.level >= totalAmount;
+
   function selectAll() {
     setRows((prev) => prev.map((row) => ({ ...row, checked: true })));
   }
@@ -188,11 +203,10 @@ function ConfirmationModal({
     setRows((prev) => prev.map((row) => ({ ...row, checked: false })));
   }
 
-  const checkedRows = rows.filter((row) => row.checked);
   const hasCheckedRows = checkedRows.length > 0;
   const allAmountsValid = checkedRows.every((row) => Number(row.amountDigits || '0') > 0);
   const tankResolved = !needsTankChoice || selectedTankId !== null;
-  const canConfirm = hasCheckedRows && allAmountsValid && tankResolved && !submitting;
+  const canConfirm = hasCheckedRows && allAmountsValid && tankResolved && hasEnoughFunds && !submitting;
 
   async function handleConfirm() {
     if (!canConfirm) return;
@@ -203,7 +217,7 @@ function ConfirmationModal({
         sectionId: confirmation.sectionId,
         kind: confirmation.kind,
         description: confirmation.label,
-        allocatedIncomeRuleId: isExpense ? rememberedTankId ?? selectedTankId : undefined,
+        allocatedIncomeRuleId: isExpense ? selectedTankId : undefined,
         occurrences: checkedRows.map((row) => ({
           occurredAt: row.date,
           amount: Number(row.amountDigits || '0') / 100,
@@ -228,6 +242,17 @@ function ConfirmationModal({
             <ThemedText type="smallBold" style={styles.modalTitle}>
               Vas a hacer efectivos {rows.length} {kindLabel} pendientes de {confirmation.label}
             </ThemedText>
+
+            {isExpense && selectedTank && (
+              <View style={styles.tankInfoBox}>
+                <ThemedText type="small" themeColor="textSecondary">
+                  Se pagará del tanque:{' '}
+                  <ThemedText type="smallBold">
+                    {`${selectedTank.label} (${currencyFormatter.format(selectedTank.level)} disponible)`}
+                  </ThemedText>
+                </ThemedText>
+              </View>
+            )}
 
             <View style={styles.selectRow}>
               <Pressable onPress={selectAll} style={({ pressed }) => pressed && styles.pressed}>
@@ -281,7 +306,9 @@ function ConfirmationModal({
                       <ThemedView
                         type={selectedTankId === tank.ruleId ? 'backgroundSelected' : 'background'}
                         style={styles.chip}>
-                        <ThemedText type="small">{tank.label}</ThemedText>
+                        <ThemedText type="small">
+                          {`${tank.label} (${currencyFormatter.format(tank.level)})`}
+                        </ThemedText>
                       </ThemedView>
                     </Pressable>
                   ))}
@@ -292,6 +319,12 @@ function ConfirmationModal({
                   </ThemedText>
                 )}
               </View>
+            )}
+
+            {isExpense && selectedTank && selectedTank.level < totalAmount && (
+              <ThemedText type="small" style={styles.errorText}>
+                No hay fondos suficientes para aceptar este gasto en {selectedTank.label} ({currencyFormatter.format(selectedTank.level)} disponibles).
+              </ThemedText>
             )}
 
             <View style={styles.modalActions}>
@@ -460,5 +493,13 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     opacity: 0.4,
+  },
+  tankInfoBox: {
+    marginTop: Spacing.one,
+  },
+  errorText: {
+    color: '#E5484D',
+    marginTop: Spacing.two,
+    fontWeight: '600',
   },
 });
