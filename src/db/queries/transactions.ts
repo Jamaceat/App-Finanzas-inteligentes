@@ -1,7 +1,7 @@
 import { and, count, desc, eq, gte, isNotNull, isNull, like, lte } from 'drizzle-orm';
 
 import { db } from '@/db/client';
-import { transactions } from '@/db/schema';
+import { transactions, recurringRules } from '@/db/schema';
 import {
   archiveRecurringRule,
   createRecurringRule,
@@ -9,7 +9,7 @@ import {
   type CustomIntervalUnit,
   type RecurringFrequency,
 } from '@/db/queries/recurring-rules';
-import { advanceDate } from '@/db/queries/tanks';
+import { advanceDate, stepBack } from '@/db/queries/tanks';
 
 export type TransactionKind = (typeof transactions.$inferSelect)['kind'];
 
@@ -80,12 +80,57 @@ export function assignTransactionToIncomeTank(transactionId: number, incomeRuleI
     .returning();
 }
 
-export function unassignTransactionFromIncomeTank(transactionId: number) {
-  return db
+// Sacar un gasto del tanque: si viene de una regla recurrente (allocateExpenseToIncomeTank
+// ya adelantó nextDueDate al asignarlo), hay que revertir ese avance para que el gasto
+// vuelva a aparecer como burbuja pendiente en "asignar gastos", y borrar la transacción
+// para no dejarla huérfana (contando como gasto libre y duplicándose si se reasigna).
+//
+// Ojo: la misma regla puede haber sido pagada de nuevo después (vía otra asignación o
+// vía "Confirmar", que también puede alocar a un tanque y procesar varios ciclos vencidos
+// de una sola vez). Si esta transacción no es la última registrada para la regla, ese
+// período posterior ya está pagado y revertir nextDueDate lo dejaría "pendiente" de nuevo
+// (doble pago / calendario roto). En ese caso solo se desvincula del tanque sin tocar la regla.
+export async function unassignTransactionFromIncomeTank(
+  transactionId: number,
+): Promise<{ periodAlreadySettled: boolean }> {
+  const [transaction] = await db.select().from(transactions).where(eq(transactions.id, transactionId));
+
+  if (transaction && transaction.kind === 'expense' && transaction.recurringRuleId !== null) {
+    const [latest] = await db
+      .select({ id: transactions.id })
+      .from(transactions)
+      .where(eq(transactions.recurringRuleId, transaction.recurringRuleId))
+      .orderBy(desc(transactions.id))
+      .limit(1);
+
+    if (latest?.id === transaction.id) {
+      const [rule] = await db
+        .select()
+        .from(recurringRules)
+        .where(eq(recurringRules.id, transaction.recurringRuleId));
+
+      if (rule && !rule.archivedAt) {
+        await updateNextDueDate(
+          rule.id,
+          stepBack(rule.nextDueDate, rule.frequency, rule.customIntervalValue, rule.customIntervalUnit),
+        );
+        await db.delete(transactions).where(eq(transactions.id, transactionId));
+        return { periodAlreadySettled: false };
+      }
+    } else {
+      await db
+        .update(transactions)
+        .set({ allocatedIncomeRuleId: null })
+        .where(eq(transactions.id, transactionId));
+      return { periodAlreadySettled: true };
+    }
+  }
+
+  await db
     .update(transactions)
     .set({ allocatedIncomeRuleId: null })
-    .where(eq(transactions.id, transactionId))
-    .returning();
+    .where(eq(transactions.id, transactionId));
+  return { periodAlreadySettled: false };
 }
 
 export function listAssignedExpenseTransactions() {

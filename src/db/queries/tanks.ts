@@ -45,7 +45,7 @@ export function advanceDate(
   return next;
 }
 
-function stepBack(
+export function stepBack(
   date: Date,
   frequency: RecurringFrequency,
   customIntervalValue?: number | null,

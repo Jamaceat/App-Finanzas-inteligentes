@@ -1,6 +1,6 @@
 import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
 import { useEffect, useMemo, useState } from 'react';
-import { StyleSheet, View, Pressable, useWindowDimensions, BackHandler } from 'react-native';
+import { StyleSheet, View, Pressable, useWindowDimensions, BackHandler, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useNavigation } from 'expo-router';
@@ -479,7 +479,13 @@ export default function AsignarGastosScreen() {
           tanks={tanks}
           expenses={pocketExpenses}
           onUnassign={async (expenseId) => {
-            await unassignTransactionFromIncomeTank(expenseId);
+            const { periodAlreadySettled } = await unassignTransactionFromIncomeTank(expenseId);
+            if (periodAlreadySettled) {
+              Alert.alert(
+                'Este período ya está pagado',
+                'Se sacó del tanque, pero como ya se pagó un ciclo posterior de este gasto recurrente no puede volver a aparecer para reasignar: eso rompería el calendario del próximo período.',
+              );
+            }
           }}
           vibrationEnabled={vibrationEnabled}
           onCollapsedChange={setIsWidgetCollapsed}
