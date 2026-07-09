@@ -404,47 +404,61 @@ function FloatingExpensePointComponent({
         translateY.value = clampedY - initialY;
       }
     })
-    .onEnd((event) => {
+    .onFinalize((event, success) => {
       isDragging.value = false;
       
-      if (isFocused) {
-        const target = hoveredTankId.value;
+      if (success) {
+        if (isFocused) {
+          const target = hoveredTankId.value;
 
-        if (target !== null) {
-          let tankLevel = 0;
-          for (let i = 0; i < tanks.length; i++) {
-            if (tanks[i].ruleId === target) {
-              tankLevel = tanks[i].level;
-              break;
+          if (target !== null) {
+            let tankLevel = 0;
+            for (let i = 0; i < tanks.length; i++) {
+              if (tanks[i].ruleId === target) {
+                tankLevel = tanks[i].level;
+                break;
+              }
             }
-          }
-          const fitsFully = isVariable || rawAmount <= tankLevel;
-          const fitsPartially = !fitsFully && allowPartialAssignment && tankLevel > 0;
+            const fitsFully = isVariable || rawAmount <= tankLevel;
+            const fitsPartially = !fitsFully && allowPartialAssignment && tankLevel > 0;
 
-          if (fitsFully) {
-            runOnJS(handleAssign)(target, rawAmount);
-          } else if (fitsPartially) {
-            runOnJS(handleAssign)(target, tankLevel);
+            if (fitsFully) {
+              runOnJS(handleAssign)(target, rawAmount);
+            } else if (fitsPartially) {
+              runOnJS(handleAssign)(target, tankLevel);
+            } else {
+              runOnJS(triggerRejectVibration)();
+              translateX.value = withSpring(centerX - initialX, { damping: 18, stiffness: 180 });
+              translateY.value = withSpring(centerY - initialY, { damping: 18, stiffness: 180 });
+              detailsVisible.value = withTiming(1, { duration: 250 });
+            }
           } else {
-            runOnJS(triggerRejectVibration)();
             translateX.value = withSpring(centerX - initialX, { damping: 18, stiffness: 180 });
             translateY.value = withSpring(centerY - initialY, { damping: 18, stiffness: 180 });
             detailsVisible.value = withTiming(1, { duration: 250 });
           }
-        } else {
+          hoveredTankId.value = null;
+        } else if (isFreeDragging.value) {
+          isFreeDragging.value = false;
+          const targetX = originX + event.translationX;
+          const targetY = originY + event.translationY;
+          const clampedX = Math.max(POINT_WIDTH / 2, Math.min(screenWidth - POINT_WIDTH / 2, targetX));
+          const clampedY = Math.max(POINT_HEIGHT / 2, Math.min(screenHeight - POINT_HEIGHT / 2, targetY));
+          runOnJS(onPositionChange)(pointKey, clampedX, clampedY);
+          startWander();
+        }
+      } else {
+        isFreeDragging.value = false;
+        hoveredTankId.value = null;
+        if (isFocused) {
           translateX.value = withSpring(centerX - initialX, { damping: 18, stiffness: 180 });
           translateY.value = withSpring(centerY - initialY, { damping: 18, stiffness: 180 });
           detailsVisible.value = withTiming(1, { duration: 250 });
+        } else {
+          translateX.value = withSpring(originX - initialX, { damping: 18, stiffness: 180 });
+          translateY.value = withSpring(originY - initialY, { damping: 18, stiffness: 180 });
+          if (!isFocused && !isDimmed) startWander();
         }
-        hoveredTankId.value = null;
-      } else if (isFreeDragging.value) {
-        isFreeDragging.value = false;
-        const targetX = originX + event.translationX;
-        const targetY = originY + event.translationY;
-        const clampedX = Math.max(POINT_WIDTH / 2, Math.min(screenWidth - POINT_WIDTH / 2, targetX));
-        const clampedY = Math.max(POINT_HEIGHT / 2, Math.min(screenHeight - POINT_HEIGHT / 2, targetY));
-        runOnJS(onPositionChange)(pointKey, clampedX, clampedY);
-        startWander();
       }
     });
 

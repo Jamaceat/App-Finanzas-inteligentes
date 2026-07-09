@@ -170,13 +170,18 @@ function FloatingClusterBubbleComponent({
       translateX.value = clampedX - initialX;
       translateY.value = clampedY - initialY;
     })
-    .onEnd((event) => {
+    .onFinalize((event, success) => {
       isFreeDragging.value = false;
-      const targetX = originX + event.translationX;
-      const targetY = originY + event.translationY;
-      const clampedX = Math.max(CLUSTER_BASE_SIZE / 2, Math.min(screenWidth - CLUSTER_BASE_SIZE / 2, targetX));
-      const clampedY = Math.max(CLUSTER_BASE_SIZE / 2, Math.min(screenHeight - CLUSTER_BASE_SIZE / 2, targetY));
-      runOnJS(onPositionChange)(nodeKey, clampedX, clampedY);
+      if (success) {
+        const targetX = originX + event.translationX;
+        const targetY = originY + event.translationY;
+        const clampedX = Math.max(CLUSTER_BASE_SIZE / 2, Math.min(screenWidth - CLUSTER_BASE_SIZE / 2, targetX));
+        const clampedY = Math.max(CLUSTER_BASE_SIZE / 2, Math.min(screenHeight - CLUSTER_BASE_SIZE / 2, targetY));
+        runOnJS(onPositionChange)(nodeKey, clampedX, clampedY);
+      } else {
+        translateX.value = withSpring(0);
+        translateY.value = withSpring(0);
+      }
       if (!isDimmed) startWander();
     });
 

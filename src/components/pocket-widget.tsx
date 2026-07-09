@@ -754,7 +754,7 @@ function FloatingBubbleComponent({
       dragX.value = Math.max(minX, Math.min(maxX, rawX));
       dragY.value = Math.max(minY, Math.min(maxY, rawY));
     })
-    .onEnd(() => {
+    .onFinalize(() => {
       dragX.value = withSpring(0);
       dragY.value = withSpring(0);
       if (!paused) startWander();
@@ -775,6 +775,8 @@ function FloatingBubbleComponent({
     opacity: opacity.value,
   }));
 
+  const bubbleBgColor = isConfirmed ? '#E5484D' : color;
+
   return (
     <GestureDetector gesture={gesture}>
       <View
@@ -789,9 +791,8 @@ function FloatingBubbleComponent({
             { borderRadius: size / 2 },
             animatedStyle,
             {
-              backgroundColor: isConfirmed ? `${color}55` : color,
-              shadowColor: isConfirmed ? 'transparent' : color,
-              opacity: isConfirmed ? 0.6 : 1,
+              backgroundColor: bubbleBgColor,
+              shadowColor: bubbleBgColor,
             },
           ]}
         >
