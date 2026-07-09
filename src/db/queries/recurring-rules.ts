@@ -73,6 +73,7 @@ export type CreateRecurringRuleInput = {
   plannedTankRuleId?: number | null;
   tankKind?: TankKind;
   specialTankExpenseId?: number | null;
+  previousRuleId?: number | null;
 };
 
 export function createRecurringRule(input: CreateRecurringRuleInput, executor: DbExecutor = db) {
@@ -190,7 +191,7 @@ export function archiveRecurringRule(id: number, executor: DbExecutor = db) {
 export async function replaceRecurringRule(archiveId: number, input: CreateRecurringRuleInput) {
   return db.transaction((tx) => {
     archiveRecurringRule(archiveId, tx).all();
-    const [created] = createRecurringRule(input, tx).all();
+    const [created] = createRecurringRule({ ...input, previousRuleId: archiveId }, tx).all();
     return created;
   });
 }

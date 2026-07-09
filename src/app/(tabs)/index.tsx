@@ -49,6 +49,7 @@ import { assignExpenseToTank } from '@/db/queries/transactions';
 import {
   useActiveRules,
   useActiveSections,
+  useAllRules,
   useAppSettingsRows,
   useTankTransactions,
 } from '@/providers/app-data';
@@ -65,6 +66,7 @@ import { formatCompactCurrency, formatCurrency } from '@/lib/format';
 
 export default function HomeScreen() {
   const rules = useActiveRules();
+  const allRules = useAllRules();
   const transactions = useTankTransactions();
   const sections = useActiveSections();
   const settingsRows = useAppSettingsRows();
@@ -129,15 +131,18 @@ export default function HomeScreen() {
     setModalVisible(true);
   };
 
-  const incomeTanks = useMemo(() => computeIncomeTanks(rules, transactions), [rules, transactions]);
+  const incomeTanks = useMemo(
+    () => computeIncomeTanks(rules, transactions, allRules),
+    [rules, transactions, allRules],
+  );
   const freeCashTank = useMemo(() => {
     const windowStart = addInterval(
       new Date(),
       -settings.tankMaxRenewalValue,
       settings.tankMaxRenewalUnit,
     );
-    return computeFreeCashTank(rules, transactions, windowStart);
-  }, [rules, transactions, settings.tankMaxRenewalValue, settings.tankMaxRenewalUnit]);
+    return computeFreeCashTank(rules, transactions, windowStart, allRules);
+  }, [rules, transactions, settings.tankMaxRenewalValue, settings.tankMaxRenewalUnit, allRules]);
   const pendingExpenses = useMemo(() => computePendingExpenses(rules), [rules]);
   const specialTanks = useMemo(() => computeSpecialTanks(rules, transactions), [rules, transactions]);
 

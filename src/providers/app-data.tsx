@@ -1,12 +1,17 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
 
-import { listActiveRecurringRules, pruneExpiredSpecialTanks } from '@/db/queries/recurring-rules';
+import {
+  listActiveRecurringRules,
+  listAllRecurringRules,
+  pruneExpiredSpecialTanks,
+} from '@/db/queries/recurring-rules';
 import { listActiveSections } from '@/db/queries/sections';
 import { watchAppSettingsRow } from '@/db/queries/settings';
 import { listTankTransactions } from '@/db/queries/transactions';
 
 type ActiveRules = Awaited<ReturnType<typeof listActiveRecurringRules>>;
+type AllRules = Awaited<ReturnType<typeof listAllRecurringRules>>;
 type ActiveSections = Awaited<ReturnType<typeof listActiveSections>>;
 type AppSettingsRows = Awaited<ReturnType<typeof watchAppSettingsRow>>;
 type TankTransactions = Awaited<ReturnType<typeof listTankTransactions>>;
@@ -17,6 +22,7 @@ type TankTransactions = Awaited<ReturnType<typeof listTankTransactions>>;
 // Contextos separados: un cambio en un dataset solo re-renderiza a sus
 // consumidores, igual que cuando cada pantalla tenía su propio useLiveQuery.
 const ActiveRulesContext = createContext<ActiveRules | null>(null);
+const AllRulesContext = createContext<AllRules | null>(null);
 const ActiveSectionsContext = createContext<ActiveSections | null>(null);
 const AppSettingsRowsContext = createContext<AppSettingsRows | null>(null);
 const TankTransactionsContext = createContext<TankTransactions | null>(null);
@@ -24,6 +30,7 @@ const AppDataReloadContext = createContext<(() => void) | null>(null);
 
 function AppDataProviderInner({ children }: { children: ReactNode }) {
   const { data: activeRules } = useLiveQuery(listActiveRecurringRules({ includeSpecialTanks: true }));
+  const { data: allRules } = useLiveQuery(listAllRecurringRules());
   const { data: activeSections } = useLiveQuery(listActiveSections());
   const { data: settingsRows } = useLiveQuery(watchAppSettingsRow());
   const { data: tankTransactions } = useLiveQuery(listTankTransactions());
@@ -43,13 +50,15 @@ function AppDataProviderInner({ children }: { children: ReactNode }) {
 
   return (
     <ActiveRulesContext.Provider value={activeRules}>
-      <ActiveSectionsContext.Provider value={activeSections}>
-        <AppSettingsRowsContext.Provider value={settingsRows}>
-          <TankTransactionsContext.Provider value={tankTransactions}>
-            {children}
-          </TankTransactionsContext.Provider>
-        </AppSettingsRowsContext.Provider>
-      </ActiveSectionsContext.Provider>
+      <AllRulesContext.Provider value={allRules}>
+        <ActiveSectionsContext.Provider value={activeSections}>
+          <AppSettingsRowsContext.Provider value={settingsRows}>
+            <TankTransactionsContext.Provider value={tankTransactions}>
+              {children}
+            </TankTransactionsContext.Provider>
+          </AppSettingsRowsContext.Provider>
+        </ActiveSectionsContext.Provider>
+      </AllRulesContext.Provider>
     </ActiveRulesContext.Provider>
   );
 }
@@ -81,6 +90,11 @@ function useRequiredContext<T>(context: React.Context<T | null>, name: string): 
 /** Reglas recurrentes activas (sin archivar), vivas ante cambios en la tabla. */
 export function useActiveRules(): ActiveRules {
   return useRequiredContext(ActiveRulesContext, 'useActiveRules');
+}
+
+/** Todas las reglas recurrentes, incluidas las archivadas (para reconstruir linaje). */
+export function useAllRules(): AllRules {
+  return useRequiredContext(AllRulesContext, 'useAllRules');
 }
 
 /** Secciones activas (sin archivar), vivas ante cambios en la tabla. */

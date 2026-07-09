@@ -9,6 +9,7 @@ import { FilterChip } from '@/components/filter-chip';
 import { PaginationControls } from '@/components/pagination-controls';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { ConfirmationModal } from '@/components/confirmation-modal';
 import { DEFAULT_SIMULATION_OCCURRENCES } from '@/constants/constants';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -24,8 +25,22 @@ import {
   type RecurringKind,
 } from '@/db/queries/recurring-rules';
 import { getOrCreateDefaultSection } from '@/db/queries/sections';
-import { advanceDate } from '@/db/queries/tanks';
-import { useActiveSections, useAppSettingsRows } from '@/providers/app-data';
+import {
+  addInterval,
+  advanceDate,
+  computeFreeCashTank,
+  computeIncomeTanks,
+  computePendingConfirmations,
+  computeSpecialTanks,
+  type PendingConfirmation,
+} from '@/db/queries/tanks';
+import {
+  useActiveRules,
+  useActiveSections,
+  useAllRules,
+  useAppSettingsRows,
+  useTankTransactions,
+} from '@/providers/app-data';
 import { cancelRuleReminder } from '@/lib/notifications';
 
 function symbol(ios: SFSymbol, android: AndroidSymbol) {
@@ -290,6 +305,11 @@ function RuleForm({
   onDone: () => void;
 }) {
   const theme = useTheme();
+  const activeRules = useActiveRules();
+  const allRules = useAllRules();
+  const transactions = useTankTransactions();
+  const appSettingsRows = useAppSettingsRows();
+  const [pendingBackfill, setPendingBackfill] = useState<PendingConfirmation | null>(null);
   const [label, setLabel] = useState(editing?.label ?? '');
   const [kind, setKind] = useState<RecurringKind>(editing?.kind ?? initialKind ?? 'expense');
   const [frequency, setFrequency] = useState<RecurringFrequency>(editing?.frequency ?? 'monthly');
@@ -323,6 +343,24 @@ function RuleForm({
     [startDate, frequency, customValueNumber, customUnit, simulationOccurrences],
   );
 
+  // Solo se usan si, tras guardar, la regla queda con ciclos vencidos por
+  // confirmar (fecha de inicio pasada) y hay que mostrar el checklist.
+  const incomeTanks = useMemo(
+    () => computeIncomeTanks(activeRules, transactions, allRules),
+    [activeRules, transactions, allRules],
+  );
+  const specialTanks = useMemo(
+    () => computeSpecialTanks(activeRules, transactions),
+    [activeRules, transactions],
+  );
+  const freeCashTank = useMemo(() => {
+    const settingsRow = appSettingsRows?.[0];
+    const tankMaxRenewalValue = settingsRow?.tankMaxRenewalValue ?? 30;
+    const tankMaxRenewalUnit = settingsRow?.tankMaxRenewalUnit ?? 'days';
+    const windowStart = addInterval(new Date(), -tankMaxRenewalValue, tankMaxRenewalUnit);
+    return computeFreeCashTank(activeRules, transactions, windowStart, allRules);
+  }, [activeRules, transactions, appSettingsRows, allRules]);
+
   function handleAmountChange(text: string) {
     const digitsOnly = text.replace(/\D/g, '');
     setAmountDigits(digitsOnly.replace(/^0+(?=\d)/, ''));
@@ -348,10 +386,11 @@ function RuleForm({
 
     const isCustom = frequency === 'custom';
 
+    let created;
     if (editing) {
       // Desactivar regla anterior (preserva el historial) y crear la nueva versión,
       // en una sola transacción/commit.
-      await replaceRecurringRule(editing.id, {
+      created = await replaceRecurringRule(editing.id, {
         sectionId: resolvedSectionId,
         label: trimmedLabel,
         kind,
@@ -364,7 +403,7 @@ function RuleForm({
         reminderEnabled,
       });
     } else {
-      await createRecurringRule({
+      [created] = await createRecurringRule({
         sectionId: resolvedSectionId,
         label: trimmedLabel,
         kind,
@@ -379,6 +418,23 @@ function RuleForm({
       setLabel('');
       setAmountDigits('');
       setStartDate(new Date());
+    }
+
+    // Si la fecha de inicio elegida ya venció, esta regla arranca con ciclos
+    // pendientes: se ofrece confirmarlos ahora mismo (con checklist) en vez de
+    // dejarlos silenciosamente esperando en la pestaña Confirmar. Los ciclos que
+    // ya se habían confirmado bajo una versión anterior de la regla (linaje vía
+    // previousRuleId) quedan excluidos automáticamente, así no se duplican.
+    const now = new Date();
+    if (created.nextDueDate < now) {
+      const [confirmation] = computePendingConfirmations([created], created.kind, {
+        allRules,
+        transactions,
+      });
+      if (confirmation) {
+        setPendingBackfill(confirmation);
+        return;
+      }
     }
 
     onDone();
@@ -510,6 +566,20 @@ function RuleForm({
           </Pressable>
         </View>
       </ThemedView>
+
+      {pendingBackfill && (
+        <ConfirmationModal
+          confirmation={pendingBackfill}
+          incomeTanks={incomeTanks}
+          specialTanks={specialTanks}
+          freeCashTank={freeCashTank}
+          transactions={transactions}
+          onClose={() => {
+            setPendingBackfill(null);
+            onDone();
+          }}
+        />
+      )}
     </View>
   );
 }
@@ -597,7 +667,6 @@ function MiniCalendar({
   function goToToday() {
     const today = new Date();
     setViewDate(new Date(today.getFullYear(), today.getMonth(), 1));
-    onChange(today);
   }
 
   function goToOrigin() {
@@ -685,6 +754,7 @@ function MiniCalendar({
           const isHighlighted = !isSelected && highlightDayKeys.has(dayKey(date));
           const isDisabled = minDate != null && date < minDate && !isSameDay(date, minDate);
           const isOrigin = originStartDate != null && isSameDay(date, originStartDate);
+          const isToday = isSameDay(date, new Date());
 
           return (
             <Pressable
@@ -715,10 +785,29 @@ function MiniCalendar({
               >
                 <ThemedText
                   type="small"
-                  style={isOrigin && !isSelected ? styles.originDayText : undefined}
+                  style={[
+                    isOrigin && !isSelected ? styles.originDayText : undefined,
+                    isToday && !isSelected && !isOrigin ? { fontWeight: 'bold' } : undefined,
+                  ]}
                 >
                   {date.getDate()}
                 </ThemedText>
+                {isToday && (
+                  <View
+                    style={{
+                      position: 'absolute',
+                      bottom: 4,
+                      width: 4,
+                      height: 4,
+                      borderRadius: 2,
+                      backgroundColor: isOrigin && !isSelected
+                        ? '#ffffff'
+                        : isSelected
+                          ? theme.text
+                          : ORIGIN_COLOR,
+                    }}
+                  />
+                )}
               </View>
             </Pressable>
           );

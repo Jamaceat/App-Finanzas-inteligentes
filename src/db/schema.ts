@@ -58,6 +58,14 @@ export const recurringRules = sqliteTable(
     plannedTankRuleId: integer('planned_tank_rule_id').references(
       (): AnySQLiteColumn => recurringRules.id,
     ),
+    // Editar una regla archiva la versión anterior y crea una fila nueva (ver
+    // replaceRecurringRule): este campo encadena la nueva con la archivada para poder
+    // reconstruir el linaje completo. Se usa para no volver a pedir confirmación de
+    // ciclos que ya se confirmaron bajo una versión anterior de la regla (p.ej. al
+    // cambiar la frecuencia con una fecha de inicio anterior a la última confirmación).
+    previousRuleId: integer('previous_rule_id').references(
+      (): AnySQLiteColumn => recurringRules.id,
+    ),
     // 'special' marca un tanque temporal creado desde el dinero Libre para cubrir un
     // gasto puntual cuando ningún tanque real alcanza (ver computeSpecialTanks). Solo
     // aplica a filas kind='income'; specialTankExpenseId apunta al gasto dueño (1 a 1).

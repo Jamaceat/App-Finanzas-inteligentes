@@ -137,6 +137,7 @@ type Rule = {
   plannedTankRuleId: number | null;
   tankKind: 'normal' | 'special';
   specialTankExpenseId: number | null;
+  previousRuleId: number | null;
 };
 
 type Transaction = {
@@ -227,7 +228,57 @@ export type IncomeTank = {
   level: number;
 };
 
-export function computeIncomeTanks(rules: Rule[], transactions: Transaction[]): IncomeTank[] {
+export type RuleLineageRow = { id: number; previousRuleId: number | null };
+
+// Editar una regla archiva la versión anterior y encadena la nueva vía previousRuleId
+// (ver replaceRecurringRule). Sin este mapeo, el dinero ya confirmado bajo la versión
+// vieja quedaría "huérfano": desaparecería de su tanque (la regla que lo generó ya no
+// está activa) y computeFreeCashTank lo trataría como sobrante de una regla dada de
+// baja, empujándolo a Libre de inmediato — aunque el ciclo actual de la regla editada
+// todavía no haya terminado. Este mapa hace que toda transacción de un ancestro
+// archivado cuente como si perteneciera a la regla activa que lo reemplazó.
+function buildLineageHeadMap(
+  allRules: RuleLineageRow[],
+  activeRuleIds: Iterable<number>,
+): Map<number, number> {
+  const rulesById = new Map(allRules.map((r) => [r.id, r]));
+  const headByAncestorId = new Map<number, number>();
+  for (const activeId of activeRuleIds) {
+    const visited = new Set<number>([activeId]);
+    let currentId = rulesById.get(activeId)?.previousRuleId ?? null;
+    while (currentId !== null && !visited.has(currentId)) {
+      visited.add(currentId);
+      headByAncestorId.set(currentId, activeId);
+      currentId = rulesById.get(currentId)?.previousRuleId ?? null;
+    }
+  }
+  return headByAncestorId;
+}
+
+function remapTransactionsToLineageHead(
+  transactions: Transaction[],
+  headByAncestorId: Map<number, number>,
+): Transaction[] {
+  if (headByAncestorId.size === 0) return transactions;
+  return transactions.map((t) => {
+    const recurringRuleId =
+      t.recurringRuleId !== null ? (headByAncestorId.get(t.recurringRuleId) ?? t.recurringRuleId) : t.recurringRuleId;
+    const allocatedIncomeRuleId =
+      t.allocatedIncomeRuleId !== null
+        ? (headByAncestorId.get(t.allocatedIncomeRuleId) ?? t.allocatedIncomeRuleId)
+        : t.allocatedIncomeRuleId;
+    if (recurringRuleId === t.recurringRuleId && allocatedIncomeRuleId === t.allocatedIncomeRuleId) {
+      return t;
+    }
+    return { ...t, recurringRuleId, allocatedIncomeRuleId };
+  });
+}
+
+export function computeIncomeTanks(
+  rules: Rule[],
+  transactions: Transaction[],
+  allRules?: RuleLineageRow[],
+): IncomeTank[] {
   const now = new Date();
   // Gastos ya planificados (asignados a un tanque) pero todavía no confirmados: se
   // descuentan del nivel disponible como si ya estuvieran comprometidos, aunque todavía
@@ -247,7 +298,10 @@ export function computeIncomeTanks(rules: Rule[], transactions: Transaction[]): 
     }
   }
 
-  const index = indexTankTransactions(transactions);
+  const effectiveTransactions = allRules
+    ? remapTransactionsToLineageHead(transactions, buildLineageHeadMap(allRules, rules.map((r) => r.id)))
+    : transactions;
+  const index = indexTankTransactions(effectiveTransactions);
 
   return rules
     .filter((rule) => rule.kind === 'income' && !rule.archivedAt && rule.tankKind !== 'special')
@@ -278,9 +332,13 @@ export function computeFreeCashTank(
   rules: Rule[],
   transactions: Transaction[],
   windowStart: Date,
+  allRules?: RuleLineageRow[],
 ): FreeCashTank {
   const activeRuleIds = new Set(rules.map((r) => r.id));
-  const index = indexTankTransactions(transactions);
+  const effectiveTransactions = allRules
+    ? remapTransactionsToLineageHead(transactions, buildLineageHeadMap(allRules, activeRuleIds))
+    : transactions;
+  const index = indexTankTransactions(effectiveTransactions);
 
   // 1. Free/non-recurring incomes (all time)
   const freeIncomeAllTime = index.freeIncomeAllTime;
@@ -487,22 +545,76 @@ export type PendingConfirmation = {
   plannedTankRuleId: number | null;
 };
 
+function dayKey(date: Date): number {
+  return Math.floor(date.getTime() / 86400000);
+}
+
+// Editar una regla archiva la versión anterior y encadena la nueva vía
+// previousRuleId (ver replaceRecurringRule). Este índice agrupa, por regla, los
+// días que ya tienen una transacción confirmada — sin importar qué versión de la
+// regla la generó — para poder excluirlos al recalcular pendientes tras un cambio
+// de frecuencia con fecha de inicio retroactiva.
+function indexConfirmedDateKeysByRuleId(transactions: Transaction[]): Map<number, Set<number>> {
+  const index = new Map<number, Set<number>>();
+  for (const t of transactions) {
+    if (t.recurringRuleId === null) continue;
+    const set = index.get(t.recurringRuleId);
+    if (set) set.add(dayKey(t.occurredAt));
+    else index.set(t.recurringRuleId, new Set([dayKey(t.occurredAt)]));
+  }
+  return index;
+}
+
+function confirmedDateKeysForLineage(
+  ruleId: number,
+  rulesById: Map<number, { previousRuleId: number | null }>,
+  confirmedByRuleId: Map<number, Set<number>>,
+): Set<number> {
+  const keys = new Set<number>();
+  const visited = new Set<number>();
+  let currentId: number | null = ruleId;
+  while (currentId !== null && !visited.has(currentId)) {
+    visited.add(currentId);
+    const confirmed = confirmedByRuleId.get(currentId);
+    if (confirmed) for (const key of confirmed) keys.add(key);
+    currentId = rulesById.get(currentId)?.previousRuleId ?? null;
+  }
+  return keys;
+}
+
+export type RuleLineageContext = {
+  // Todas las reglas (incluidas las archivadas) con al menos id/previousRuleId,
+  // necesarias para reconstruir el linaje de una regla editada.
+  allRules: { id: number; previousRuleId: number | null }[];
+  transactions: Transaction[];
+};
+
 export function computePendingConfirmations(
   rules: Rule[],
   kind: 'income' | 'expense',
+  lineage?: RuleLineageContext,
 ): PendingConfirmation[] {
   const now = new Date();
+  const rulesById = lineage ? new Map(lineage.allRules.map((r) => [r.id, r])) : null;
+  const confirmedByRuleId = lineage ? indexConfirmedDateKeysByRuleId(lineage.transactions) : null;
+
   return rules
     .filter(
       (rule) =>
         rule.kind === kind && !rule.archivedAt && rule.nextDueDate < now && rule.tankKind !== 'special',
     )
     .map((rule) => {
+      const excludedKeys =
+        rulesById && confirmedByRuleId
+          ? confirmedDateKeysForLineage(rule.id, rulesById, confirmedByRuleId)
+          : null;
       const occurrences: Date[] = [];
       let current = rule.nextDueDate;
       let iterations = 0;
       while (current < now && iterations < 500) {
-        occurrences.push(current);
+        if (!excludedKeys?.has(dayKey(current))) {
+          occurrences.push(current);
+        }
         current = advanceDate(current, rule.frequency, rule.customIntervalValue, rule.customIntervalUnit);
         iterations++;
       }
@@ -520,5 +632,8 @@ export function computePendingConfirmations(
         nextDueAfter: current,
         plannedTankRuleId: rule.plannedTankRuleId,
       };
-    });
+    })
+    // Una regla puede quedar sin ocurrencias si todos sus ciclos vencidos ya se
+    // habían confirmado bajo una versión anterior (ver excludedKeys arriba).
+    .filter((confirmation) => confirmation.occurrences.length > 0);
 }

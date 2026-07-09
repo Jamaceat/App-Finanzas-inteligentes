@@ -36,6 +36,7 @@ import {
 import {
   useActiveRules,
   useActiveSections,
+  useAllRules,
   useAppSettingsRows,
   useTankTransactions,
 } from '@/providers/app-data';
@@ -101,6 +102,7 @@ function collectClusterTotals(nodes: BubbleNode[]): number[] {
 export default function AsignarGastosScreen() {
   const theme = useTheme();
   const rules = useActiveRules();
+  const allRules = useAllRules();
   const transactions = useTankTransactions();
   const sections = useActiveSections();
   const settingsRows = useAppSettingsRows();
@@ -125,13 +127,16 @@ export default function AsignarGastosScreen() {
   const [expandedPath, setExpandedPath] = useState<string[]>([]);
   const { bringToFront, getZIndex } = useBubbleFrontOrder();
 
-  const incomeTanks = useMemo(() => computeIncomeTanks(rules, transactions), [rules, transactions]);
+  const incomeTanks = useMemo(
+    () => computeIncomeTanks(rules, transactions, allRules),
+    [rules, transactions, allRules],
+  );
   const pendingExpenses = useMemo(() => computePendingExpenses(rules), [rules]);
   const specialTanks = useMemo(() => computeSpecialTanks(rules, transactions), [rules, transactions]);
   const freeCashTank = useMemo(() => {
     const windowStart = addInterval(new Date(), -tankMaxRenewalValue, tankMaxRenewalUnit);
-    return computeFreeCashTank(rules, transactions, windowStart);
-  }, [rules, transactions, tankMaxRenewalValue, tankMaxRenewalUnit]);
+    return computeFreeCashTank(rules, transactions, windowStart, allRules);
+  }, [rules, transactions, tankMaxRenewalValue, tankMaxRenewalUnit, allRules]);
 
   // Target radial "Tanque especial temporal": siempre se ofrece (validado por su
   // propio nivel/capacidad, igual que cualquier otro tanque) para cubrir un gasto con

@@ -93,8 +93,8 @@ export default function TransactionsScreen() {
   );
 
   const incomeTanks = useMemo(
-    () => computeIncomeTanks(rules, allTransactions),
-    [rules, allTransactions],
+    () => computeIncomeTanks(rules, allTransactions, allRules),
+    [rules, allTransactions, allRules],
   );
   const freeCashTank = useMemo(() => {
     const windowStart = addInterval(
@@ -102,8 +102,8 @@ export default function TransactionsScreen() {
       -settings.tankMaxRenewalValue,
       settings.tankMaxRenewalUnit,
     );
-    return computeFreeCashTank(rules, allTransactions, windowStart);
-  }, [rules, allTransactions, settings.tankMaxRenewalValue, settings.tankMaxRenewalUnit]);
+    return computeFreeCashTank(rules, allTransactions, windowStart, allRules);
+  }, [rules, allTransactions, settings.tankMaxRenewalValue, settings.tankMaxRenewalUnit, allRules]);
 
   const tanks: SearchTankItem[] = useMemo(() => {
     const list: SearchTankItem[] = [
