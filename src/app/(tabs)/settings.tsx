@@ -1,4 +1,3 @@
-import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -16,7 +15,6 @@ import { useTheme } from '@/hooks/use-theme';
 import {
   getAppSettings,
   updateTankMaxRenewal,
-  watchAppSettingsRow,
   updateVibrationEnabled,
   updateCalendarSimulationOccurrences,
   updateRestrictPastStartDates,
@@ -24,6 +22,7 @@ import {
   updateAllowPartialTankAssignment,
   type TankMaxRenewalUnit,
 } from '@/db/queries/settings';
+import { useAppSettingsRows } from '@/providers/app-data';
 
 const UNIT_OPTIONS: { value: TankMaxRenewalUnit; label: string }[] = [
   { value: 'days', label: 'Días' },
@@ -33,7 +32,7 @@ const UNIT_OPTIONS: { value: TankMaxRenewalUnit; label: string }[] = [
 ];
 
 export default function SettingsScreen() {
-  const { data: rows } = useLiveQuery(watchAppSettingsRow());
+  const rows = useAppSettingsRows();
   const row = rows[0];
 
   useEffect(() => {

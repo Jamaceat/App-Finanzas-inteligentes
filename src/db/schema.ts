@@ -1,83 +1,114 @@
 import { sql } from 'drizzle-orm';
-import { type AnySQLiteColumn, integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import {
+  type AnySQLiteColumn,
+  index,
+  integer,
+  real,
+  sqliteTable,
+  text,
+} from 'drizzle-orm/sqlite-core';
 
-export const sections = sqliteTable('sections', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  name: text('name').notNull(),
-  icon: text('icon').notNull(),
-  color: text('color').notNull(),
-  kind: text('kind', { enum: ['income', 'expense', 'both'] })
-    .notNull()
-    .default('both'),
-  archivedAt: integer('archived_at', { mode: 'timestamp' }),
-  createdAt: integer('created_at', { mode: 'timestamp' })
-    .notNull()
-    .default(sql`(unixepoch())`),
-});
+export const sections = sqliteTable(
+  'sections',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    name: text('name').notNull(),
+    icon: text('icon').notNull(),
+    color: text('color').notNull(),
+    kind: text('kind', { enum: ['income', 'expense', 'both'] })
+      .notNull()
+      .default('both'),
+    archivedAt: integer('archived_at', { mode: 'timestamp' }),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [index('sections_archived_at_idx').on(table.archivedAt)],
+);
 
-export const recurringRules = sqliteTable('recurring_rules', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  sectionId: integer('section_id')
-    .notNull()
-    .references(() => sections.id),
-  label: text('label').notNull(),
-  kind: text('kind', { enum: ['income', 'expense'] }).notNull(),
-  frequency: text('frequency', {
-    enum: [
-      'daily',
-      'weekly',
-      'biweekly',
-      'monthly',
-      'quarterly',
-      'semiannual',
-      'yearly',
-      'custom',
-    ],
-  }).notNull(),
-  customIntervalValue: integer('custom_interval_value'),
-  customIntervalUnit: text('custom_interval_unit', { enum: ['days', 'weeks'] }),
-  isVariableAmount: integer('is_variable_amount', { mode: 'boolean' }).notNull().default(false),
-  estimatedAmount: real('estimated_amount'),
-  nextDueDate: integer('next_due_date', { mode: 'timestamp' }).notNull(),
-  // Solo aplica a reglas kind='expense': tanque de ingreso del que va a salir este
-  // gasto una vez confirmado. Se setea al "asignar" en asignar-gastos/Home (planificar,
-  // sin crear transacción todavía) y se lee en Confirmar para no volver a preguntar.
-  plannedTankRuleId: integer('planned_tank_rule_id').references(
-    (): AnySQLiteColumn => recurringRules.id,
-  ),
-  reminderEnabled: integer('reminder_enabled', { mode: 'boolean' }).notNull().default(true),
-  archivedAt: integer('archived_at', { mode: 'timestamp' }),
-  createdAt: integer('created_at', { mode: 'timestamp' })
-    .notNull()
-    .default(sql`(unixepoch())`),
-});
+export const recurringRules = sqliteTable(
+  'recurring_rules',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    sectionId: integer('section_id')
+      .notNull()
+      .references(() => sections.id),
+    label: text('label').notNull(),
+    kind: text('kind', { enum: ['income', 'expense'] }).notNull(),
+    frequency: text('frequency', {
+      enum: [
+        'daily',
+        'weekly',
+        'biweekly',
+        'monthly',
+        'quarterly',
+        'semiannual',
+        'yearly',
+        'custom',
+      ],
+    }).notNull(),
+    customIntervalValue: integer('custom_interval_value'),
+    customIntervalUnit: text('custom_interval_unit', { enum: ['days', 'weeks'] }),
+    isVariableAmount: integer('is_variable_amount', { mode: 'boolean' }).notNull().default(false),
+    estimatedAmount: real('estimated_amount'),
+    nextDueDate: integer('next_due_date', { mode: 'timestamp' }).notNull(),
+    // Solo aplica a reglas kind='expense': tanque de ingreso del que va a salir este
+    // gasto una vez confirmado. Se setea al "asignar" en asignar-gastos/Home (planificar,
+    // sin crear transacción todavía) y se lee en Confirmar para no volver a preguntar.
+    plannedTankRuleId: integer('planned_tank_rule_id').references(
+      (): AnySQLiteColumn => recurringRules.id,
+    ),
+    reminderEnabled: integer('reminder_enabled', { mode: 'boolean' }).notNull().default(true),
+    archivedAt: integer('archived_at', { mode: 'timestamp' }),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [index('recurring_rules_archived_at_idx').on(table.archivedAt)],
+);
 
-export const transactions = sqliteTable('transactions', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  sectionId: integer('section_id')
-    .notNull()
-    .references(() => sections.id),
-  recurringRuleId: integer('recurring_rule_id').references(() => recurringRules.id),
-  allocatedIncomeRuleId: integer('allocated_income_rule_id').references(() => recurringRules.id),
-  amount: real('amount').notNull(),
-  kind: text('kind', { enum: ['income', 'expense'] }).notNull(),
-  description: text('description'),
-  occurredAt: integer('occurred_at', { mode: 'timestamp' }).notNull(),
-  createdAt: integer('created_at', { mode: 'timestamp' })
-    .notNull()
-    .default(sql`(unixepoch())`),
-});
+export const transactions = sqliteTable(
+  'transactions',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    sectionId: integer('section_id')
+      .notNull()
+      .references(() => sections.id),
+    recurringRuleId: integer('recurring_rule_id').references(() => recurringRules.id),
+    allocatedIncomeRuleId: integer('allocated_income_rule_id').references(() => recurringRules.id),
+    amount: real('amount').notNull(),
+    kind: text('kind', { enum: ['income', 'expense'] }).notNull(),
+    description: text('description'),
+    occurredAt: integer('occurred_at', { mode: 'timestamp' }).notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [
+    index('transactions_occurred_at_idx').on(table.occurredAt),
+    index('transactions_section_id_idx').on(table.sectionId),
+    index('transactions_recurring_rule_id_idx').on(table.recurringRuleId),
+    index('transactions_kind_allocated_income_rule_id_idx').on(
+      table.kind,
+      table.allocatedIncomeRuleId,
+    ),
+  ],
+);
 
-export const savingsGoals = sqliteTable('savings_goals', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  name: text('name').notNull(),
-  targetAmount: real('target_amount').notNull(),
-  currentAmount: real('current_amount').notNull().default(0),
-  archivedAt: integer('archived_at', { mode: 'timestamp' }),
-  createdAt: integer('created_at', { mode: 'timestamp' })
-    .notNull()
-    .default(sql`(unixepoch())`),
-});
+export const savingsGoals = sqliteTable(
+  'savings_goals',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    name: text('name').notNull(),
+    targetAmount: real('target_amount').notNull(),
+    currentAmount: real('current_amount').notNull().default(0),
+    archivedAt: integer('archived_at', { mode: 'timestamp' }),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [index('savings_goals_archived_at_idx').on(table.archivedAt)],
+);
 
 export const appSettings = sqliteTable('app_settings', {
   id: integer('id').primaryKey({ autoIncrement: true }),

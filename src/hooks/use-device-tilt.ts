@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { useIsFocused } from 'expo-router';
 import { DeviceMotion } from 'expo-sensors';
 import { useSharedValue, type SharedValue } from 'react-native-reanimated';
 
@@ -13,8 +14,13 @@ function clamp(value: number, min: number, max: number) {
 /** Shared value with the device's left/right tilt in degrees, clamped to ±MAX_TILT_DEG. Falls back to 0 if the sensor is unavailable. */
 export function useDeviceTilt(): SharedValue<number> {
   const tilt = useSharedValue(0);
+  // NativeTabs mantiene la pantalla montada al cambiar de tab: sin este gate, el sensor
+  // seguiría emitiendo (~16×/s) y animando tanques invisibles.
+  const isFocused = useIsFocused();
 
   useEffect(() => {
+    if (!isFocused) return;
+
     let subscription: { remove: () => void } | undefined;
     let cancelled = false;
 
@@ -38,7 +44,7 @@ export function useDeviceTilt(): SharedValue<number> {
       cancelled = true;
       subscription?.remove();
     };
-  }, [tilt]);
+  }, [tilt, isFocused]);
 
   return tilt;
 }

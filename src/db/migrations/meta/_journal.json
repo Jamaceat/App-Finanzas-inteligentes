@@ -71,6 +71,13 @@
       "when": 1783571325934,
       "tag": "0009_nappy_eternals",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1783572329092,
+      "tag": "0010_certain_radioactive_man",
+      "breakpoints": true
     }
   ]
 }

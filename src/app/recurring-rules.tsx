@@ -1,6 +1,6 @@
 import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
 import { useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { SymbolView, type AndroidSymbol, type SFSymbol } from 'expo-symbols';
@@ -18,13 +18,14 @@ import {
   countActiveRecurringRules,
   createRecurringRule,
   listActiveRecurringRules,
+  replaceRecurringRule,
   type CustomIntervalUnit,
   type RecurringFrequency,
   type RecurringKind,
 } from '@/db/queries/recurring-rules';
-import { getOrCreateDefaultSection, listActiveSections } from '@/db/queries/sections';
-import { watchAppSettingsRow } from '@/db/queries/settings';
+import { getOrCreateDefaultSection } from '@/db/queries/sections';
 import { advanceDate } from '@/db/queries/tanks';
+import { useActiveSections, useAppSettingsRows } from '@/providers/app-data';
 import { cancelRuleReminder } from '@/lib/notifications';
 
 function symbol(ios: SFSymbol, android: AndroidSymbol) {
@@ -95,8 +96,8 @@ export default function RecurringRulesScreen() {
   const params = useLocalSearchParams<{ kind?: RecurringKind; variable?: string }>();
   const [kindFilter, setKindFilter] = useState<RecurringKind | undefined>(params.kind);
   const [searchText, setSearchText] = useState('');
-  const { data: sections } = useLiveQuery(listActiveSections());
-  const { data: settingsRows } = useLiveQuery(watchAppSettingsRow());
+  const sections = useActiveSections();
+  const settingsRows = useAppSettingsRows();
   const settings = settingsRows?.[0];
   const [editingId, setEditingId] = useState<number | null>(null);
 
@@ -315,12 +316,11 @@ function RuleForm({
   const formattedAmount = formatCurrencyInput(amountDigits);
   const customValueNumber = Math.max(1, Number(customValue) || 1);
 
-  const upcomingDates = simulateOccurrences(
-    startDate,
-    frequency,
-    customValueNumber,
-    customUnit,
-    simulationOccurrences,
+  // Memoizado: sin esto se re-simulan todas las ocurrencias (y se re-renderiza
+  // el MiniCalendar con array nuevo) en cada tecleo del formulario.
+  const upcomingDates = useMemo(
+    () => simulateOccurrences(startDate, frequency, customValueNumber, customUnit, simulationOccurrences),
+    [startDate, frequency, customValueNumber, customUnit, simulationOccurrences],
   );
 
   function handleAmountChange(text: string) {
@@ -349,10 +349,9 @@ function RuleForm({
     const isCustom = frequency === 'custom';
 
     if (editing) {
-      // Desactivar regla anterior para preservar el historial de ciclos pasados
-      await archiveRecurringRule(editing.id);
-      // Crear nueva versión de la regla con los cambios aplicados
-      await createRecurringRule({
+      // Desactivar regla anterior (preserva el historial) y crear la nueva versión,
+      // en una sola transacción/commit.
+      await replaceRecurringRule(editing.id, {
         sectionId: resolvedSectionId,
         label: trimmedLabel,
         kind,
@@ -546,6 +545,10 @@ function isSameDay(a: Date, b: Date): boolean {
   );
 }
 
+function dayKey(date: Date): number {
+  return date.getFullYear() * 10000 + date.getMonth() * 100 + date.getDate();
+}
+
 const monthFormatter = new Intl.DateTimeFormat('es-AR', { month: 'long', year: 'numeric' });
 
 function MiniCalendar({
@@ -566,6 +569,13 @@ function MiniCalendar({
   const theme = useTheme();
   const [viewDate, setViewDate] = useState(new Date(value.getFullYear(), value.getMonth(), 1));
   const [containerWidth, setContainerWidth] = useState(0);
+
+  // Set de días resaltados: evita highlightDates.some(isSameDay) por cada una
+  // de las 42 celdas de la grilla.
+  const highlightDayKeys = useMemo(
+    () => new Set(highlightDates.map(dayKey)),
+    [highlightDates],
+  );
 
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
@@ -672,7 +682,7 @@ function MiniCalendar({
           }
 
           const isSelected = isSameDay(date, value);
-          const isHighlighted = !isSelected && highlightDates.some((d) => isSameDay(d, date));
+          const isHighlighted = !isSelected && highlightDayKeys.has(dayKey(date));
           const isDisabled = minDate != null && date < minDate && !isSameDay(date, minDate);
           const isOrigin = originStartDate != null && isSameDay(date, originStartDate);
 

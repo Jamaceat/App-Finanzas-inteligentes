@@ -145,14 +145,76 @@ type Transaction = {
   allocatedIncomeRuleId: number | null;
 };
 
-function sumInWindow(
-  transactions: Transaction[],
-  predicate: (transaction: Transaction) => boolean,
-  window: { start: Date; end: Date },
-) {
-  return transactions
-    .filter((t) => predicate(t) && t.occurredAt >= window.start && t.occurredAt < window.end)
-    .reduce((total, t) => total + t.amount, 0);
+const EMPTY_TRANSACTIONS: Transaction[] = [];
+
+// Índice de una sola pasada sobre las transacciones para que los cómputos de
+// tanques no re-escaneen el array completo por cada regla/ciclo. Los arrays
+// preservan el orden original, así las sumas por subconjunto dan exactamente
+// el mismo resultado que filtrar el array completo.
+type TankTransactionsIndex = {
+  incomeByRuleId: Map<number, Transaction[]>;
+  expenseByAllocatedRuleId: Map<number, Transaction[]>;
+  recurringIncomes: Transaction[];
+  allocatedExpenses: Transaction[];
+  freeIncomes: Transaction[];
+  freeIncomeAllTime: number;
+  freeExpenseAllTime: number;
+  oldestTxDate: Date;
+};
+
+function indexTankTransactions(transactions: Transaction[]): TankTransactionsIndex {
+  const incomeByRuleId = new Map<number, Transaction[]>();
+  const expenseByAllocatedRuleId = new Map<number, Transaction[]>();
+  const recurringIncomes: Transaction[] = [];
+  const allocatedExpenses: Transaction[] = [];
+  const freeIncomes: Transaction[] = [];
+  let freeIncomeAllTime = 0;
+  let freeExpenseAllTime = 0;
+  let oldestTxDate = new Date();
+
+  for (const t of transactions) {
+    if (t.occurredAt < oldestTxDate) oldestTxDate = t.occurredAt;
+
+    if (t.kind === 'income') {
+      if (t.recurringRuleId === null) {
+        freeIncomes.push(t);
+        freeIncomeAllTime += t.amount;
+      } else {
+        recurringIncomes.push(t);
+        const list = incomeByRuleId.get(t.recurringRuleId);
+        if (list) list.push(t);
+        else incomeByRuleId.set(t.recurringRuleId, [t]);
+      }
+    } else {
+      if (t.allocatedIncomeRuleId === null) {
+        freeExpenseAllTime += t.amount;
+      } else {
+        allocatedExpenses.push(t);
+        const list = expenseByAllocatedRuleId.get(t.allocatedIncomeRuleId);
+        if (list) list.push(t);
+        else expenseByAllocatedRuleId.set(t.allocatedIncomeRuleId, [t]);
+      }
+    }
+  }
+
+  return {
+    incomeByRuleId,
+    expenseByAllocatedRuleId,
+    recurringIncomes,
+    allocatedExpenses,
+    freeIncomes,
+    freeIncomeAllTime,
+    freeExpenseAllTime,
+    oldestTxDate,
+  };
+}
+
+function sumInWindow(transactions: Transaction[], window: { start: Date; end: Date }) {
+  let total = 0;
+  for (const t of transactions) {
+    if (t.occurredAt >= window.start && t.occurredAt < window.end) total += t.amount;
+  }
+  return total;
 }
 
 export type IncomeTank = {
@@ -183,18 +245,15 @@ export function computeIncomeTanks(rules: Rule[], transactions: Transaction[]): 
     }
   }
 
+  const index = indexTankTransactions(transactions);
+
   return rules
     .filter((rule) => rule.kind === 'income' && !rule.archivedAt)
     .map((rule) => {
       const window = getCycleWindow(rule);
-      const received = sumInWindow(
-        transactions,
-        (t) => t.kind === 'income' && t.recurringRuleId === rule.id,
-        window,
-      );
+      const received = sumInWindow(index.incomeByRuleId.get(rule.id) ?? EMPTY_TRANSACTIONS, window);
       const allocated = sumInWindow(
-        transactions,
-        (t) => t.kind === 'expense' && t.allocatedIncomeRuleId === rule.id,
+        index.expenseByAllocatedRuleId.get(rule.id) ?? EMPTY_TRANSACTIONS,
         window,
       );
       const reserved = plannedByTank.get(rule.id) ?? 0;
@@ -219,32 +278,29 @@ export function computeFreeCashTank(
   windowStart: Date,
 ): FreeCashTank {
   const activeRuleIds = new Set(rules.map((r) => r.id));
+  const index = indexTankTransactions(transactions);
 
   // 1. Free/non-recurring incomes (all time)
-  const freeIncomeAllTime = transactions
-    .filter((t) => t.kind === 'income' && t.recurringRuleId === null)
-    .reduce((sum, t) => sum + t.amount, 0);
+  const freeIncomeAllTime = index.freeIncomeAllTime;
 
   // 2. Free/non-recurring expenses (all time)
   // Note: Only count expenses that are not allocated to any active recurring rule
-  const freeExpenseAllTime = transactions
-    .filter((t) => t.kind === 'expense' && t.allocatedIncomeRuleId === null)
-    .reduce((sum, t) => sum + t.amount, 0);
+  const freeExpenseAllTime = index.freeExpenseAllTime;
+
+  // Boundary for the per-rule cycle walk below (hoisted: it only depends on
+  // the transactions, not on the rule).
+  const oldestTxDate = index.oldestTxDate;
 
   // 3. Leftover from closed cycles of active recurring income rules
   const activeRulesLeftover = rules
     .filter((rule) => rule.kind === 'income' && !rule.archivedAt)
     .reduce((total, rule) => {
+      const ruleIncomes = index.incomeByRuleId.get(rule.id) ?? EMPTY_TRANSACTIONS;
+      const ruleAllocated = index.expenseByAllocatedRuleId.get(rule.id) ?? EMPTY_TRANSACTIONS;
       const { start: currentStart } = getCycleWindow(rule);
       let cycleEnd = currentStart;
       let ruleLeftover = 0;
       let iterations = 0;
-
-      // Find oldest transaction to set a sensible boundary
-      const oldestTxDate = transactions.reduce(
-        (oldest, t) => (t.occurredAt < oldest ? t.occurredAt : oldest),
-        new Date(),
-      );
 
       while (cycleEnd > oldestTxDate && iterations < 500) {
         iterations++;
@@ -255,16 +311,8 @@ export function computeFreeCashTank(
           rule.customIntervalUnit,
         );
         const window = { start: cycleStart, end: cycleEnd };
-        const received = sumInWindow(
-          transactions,
-          (t) => t.kind === 'income' && t.recurringRuleId === rule.id,
-          window,
-        );
-        const allocated = sumInWindow(
-          transactions,
-          (t) => t.kind === 'expense' && t.allocatedIncomeRuleId === rule.id,
-          window,
-        );
+        const received = sumInWindow(ruleIncomes, window);
+        const allocated = sumInWindow(ruleAllocated, window);
         ruleLeftover += Math.max(0, received - allocated);
         cycleEnd = cycleStart;
       }
@@ -272,22 +320,12 @@ export function computeFreeCashTank(
     }, 0);
 
   // 4. Leftover from archived rules
-  const archivedIncomes = transactions
-    .filter(
-      (t) =>
-        t.kind === 'income' &&
-        t.recurringRuleId !== null &&
-        !activeRuleIds.has(t.recurringRuleId),
-    )
+  const archivedIncomes = index.recurringIncomes
+    .filter((t) => t.recurringRuleId !== null && !activeRuleIds.has(t.recurringRuleId))
     .reduce((sum, t) => sum + t.amount, 0);
 
-  const archivedExpenses = transactions
-    .filter(
-      (t) =>
-        t.kind === 'expense' &&
-        t.allocatedIncomeRuleId !== null &&
-        !activeRuleIds.has(t.allocatedIncomeRuleId),
-    )
+  const archivedExpenses = index.allocatedExpenses
+    .filter((t) => t.allocatedIncomeRuleId !== null && !activeRuleIds.has(t.allocatedIncomeRuleId))
     .reduce((sum, t) => sum + t.amount, 0);
 
   const archivedLeftover = Math.max(0, archivedIncomes - archivedExpenses);
@@ -298,11 +336,7 @@ export function computeFreeCashTank(
   // Capacity is the non-recurring incomes in the current window
   const now = new Date();
   const window = { start: windowStart, end: now };
-  const freeIncomeInWindow = sumInWindow(
-    transactions,
-    (t) => t.kind === 'income' && t.recurringRuleId === null,
-    window,
-  );
+  const freeIncomeInWindow = sumInWindow(index.freeIncomes, window);
 
   return {
     capacity: Math.max(freeIncomeInWindow, 1),

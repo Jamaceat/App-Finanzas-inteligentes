@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/immutability */
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { StyleSheet, View, Pressable, useWindowDimensions, Vibration } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -44,14 +44,11 @@ export type MiniTankTarget = {
   capacity: number;
 };
 
-type Rect = { x: number; y: number; width: number; height: number };
-
 export const POINT_WIDTH = 160;
 export const POINT_HEIGHT = 52;
 const TANK_SIZE = 80;
-const RADIAL_RADIUS = 130;
 
-export function FloatingExpensePoint({
+function FloatingExpensePointComponent({
   pointKey,
   label,
   amountLabel,
@@ -102,7 +99,7 @@ export function FloatingExpensePoint({
   vibrationEnabled: boolean;
   onPositionChange: (key: string, x: number, y: number) => void;
   zIndex: number;
-  onInteractionStart: () => void;
+  onInteractionStart: (key: string) => void;
   sizeScale?: number;
   urgency?: Urgency;
   forceDimmed?: boolean;
@@ -314,7 +311,7 @@ export function FloatingExpensePoint({
 
   const tap = Gesture.Tap()
     .onEnd(() => {
-      runOnJS(onInteractionStart)();
+      runOnJS(onInteractionStart)(pointKey);
       runOnJS(onSetFocused)(isFocused ? null : pointKey);
     });
 
@@ -332,7 +329,7 @@ export function FloatingExpensePoint({
         translateY.value = withSpring(clampedY - initialY, { damping: 20, stiffness: 200 });
       } else {
         isFreeDragging.value = true;
-        runOnJS(onInteractionStart)();
+        runOnJS(onInteractionStart)(pointKey);
       }
     })
     .onUpdate((event) => {
@@ -456,13 +453,6 @@ export function FloatingExpensePoint({
   const pointStyle = useAnimatedStyle(() => {
     const tx = translateX.value + wanderX.value;
     const ty = translateY.value + wanderY.value;
-    
-    let targetOpacity = 1;
-    if (assigningTankId !== null) {
-      targetOpacity = 0;
-    } else if (isDimmed) {
-      targetOpacity = 0.12;
-    }
 
     return {
       transform: [
@@ -470,9 +460,20 @@ export function FloatingExpensePoint({
         { translateY: ty },
         { scale: pillScale.value },
       ],
-      opacity: withTiming(targetOpacity, { duration: 250 }),
     };
   });
+
+  // Aparte del transform: aquel worklet corre en cada frame del wander/drag, y
+  // la opacidad solo cambia con assigningTankId/isDimmed.
+  const pointOpacityStyle = useAnimatedStyle(() => {
+    let targetOpacity = 1;
+    if (assigningTankId !== null) {
+      targetOpacity = 0;
+    } else if (isDimmed) {
+      targetOpacity = 0.12;
+    }
+    return { opacity: withTiming(targetOpacity, { duration: 250 }) };
+  }, [assigningTankId, isDimmed]);
 
   const detailsStyle = useAnimatedStyle(() => {
     return {
@@ -539,7 +540,8 @@ export function FloatingExpensePoint({
               shadowColor: displayColor,
             },
             urgencyColor ? { borderColor: urgencyColor, borderWidth: 2.5 } : null,
-            pointStyle
+            pointStyle,
+            pointOpacityStyle
           ]}
         >
           <View style={styles.pillIconContainer}>
@@ -606,6 +608,10 @@ export function FloatingExpensePoint({
     </View>
   );
 }
+
+// Memoizado: hay hasta MAX_FLOATING_BUBBLES instancias, cada una con ~8 shared
+// values y gestos; sin memo, cualquier estado del padre las re-renderiza todas.
+export const FloatingExpensePoint = memo(FloatingExpensePointComponent);
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 

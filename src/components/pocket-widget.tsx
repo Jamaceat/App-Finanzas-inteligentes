@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/immutability */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Modal,
   Pressable,
@@ -259,6 +259,19 @@ export function PocketWidget({
     setSelectedExpense(null);
   }
 
+  // Callbacks estables para FloatingBubble (memoizado): una referencia nueva
+  // por render anularía el memo en cada tick de scroll.
+  const handleSelectTank = useCallback((ruleId: number) => {
+    setSelectedTankId(ruleId);
+  }, []);
+
+  const handleSelectExpense = useCallback(
+    (expenseId: number) => {
+      setSelectedExpense(expenses.find((expense) => expense.id === expenseId) ?? null);
+    },
+    [expenses],
+  );
+
   function handleUnassign() {
     if (!selectedExpense) return;
     onUnassign(selectedExpense.id);
@@ -396,6 +409,8 @@ export function PocketWidget({
                       return (
                         <FloatingBubble
                           key={tank.ruleId}
+                          id={tank.ruleId}
+                          frontOrderKey={`tank-${tank.ruleId}`}
                           x={x}
                           y={y}
                           size={size}
@@ -406,9 +421,9 @@ export function PocketWidget({
                           color={tank.color}
                           label={tank.label}
                           sublabel={`${expensesByTank.get(tank.ruleId)?.length ?? 0} gastos`}
-                          onPress={() => setSelectedTankId(tank.ruleId)}
+                          onPress={handleSelectTank}
                           zIndex={getZIndex(`tank-${tank.ruleId}`)}
-                          onInteractionStart={() => bringToFront(`tank-${tank.ruleId}`)}
+                          onInteractionStart={bringToFront}
                           vibrationEnabled={vibrationEnabled}
                         />
                       );
@@ -422,6 +437,8 @@ export function PocketWidget({
                       return (
                         <FloatingBubble
                           key={expense.id}
+                          id={expense.id}
+                          frontOrderKey={`expense-${expense.id}`}
                           x={x}
                           y={y}
                           size={size}
@@ -432,9 +449,9 @@ export function PocketWidget({
                           color={selectedTank.color}
                           label={expense.label}
                           sublabel={formatCompactCurrency(expense.amount)}
-                          onPress={() => setSelectedExpense(expense)}
+                          onPress={handleSelectExpense}
                           zIndex={getZIndex(`expense-${expense.id}`)}
-                          onInteractionStart={() => bringToFront(`expense-${expense.id}`)}
+                          onInteractionStart={bringToFront}
                           vibrationEnabled={vibrationEnabled}
                         />
                       );
@@ -618,7 +635,9 @@ function TankStatusBar({ tank }: { tank: PocketTank }) {
   );
 }
 
-function FloatingBubble({
+function FloatingBubbleComponent({
+  id,
+  frontOrderKey,
   x,
   y,
   size,
@@ -634,6 +653,8 @@ function FloatingBubble({
   onInteractionStart,
   vibrationEnabled,
 }: {
+  id: number;
+  frontOrderKey: string;
   x: number;
   y: number;
   size: number;
@@ -644,9 +665,9 @@ function FloatingBubble({
   color: string;
   label: string;
   sublabel: string;
-  onPress: () => void;
+  onPress: (id: number) => void;
   zIndex: number;
-  onInteractionStart: () => void;
+  onInteractionStart: (key: string) => void;
   vibrationEnabled: boolean;
 }) {
   const wanderX = useSharedValue(0);
@@ -712,7 +733,7 @@ function FloatingBubble({
       wanderY.value = withTiming(0, { duration: 150 });
       dragStartX.value = dragX.value;
       dragStartY.value = dragY.value;
-      runOnJS(onInteractionStart)();
+      runOnJS(onInteractionStart)(frontOrderKey);
       runOnJS(triggerPickupVibration)();
     })
     .onUpdate((event) => {
@@ -732,7 +753,7 @@ function FloatingBubble({
     });
 
   const tap = Gesture.Tap().onEnd(() => {
-    runOnJS(onPress)();
+    runOnJS(onPress)(id);
   });
 
   const gesture = Gesture.Exclusive(pan, tap);
@@ -773,6 +794,11 @@ function FloatingBubble({
     </GestureDetector>
   );
 }
+
+// Memoizado: hay una instancia por tanque/gasto en la grilla y el setState del
+// onScroll (visibleRange -> paused) re-renderiza el widget en cada tick; sin
+// memo, todas las burbujas re-renderizan aunque su `paused` no haya cambiado.
+const FloatingBubble = memo(FloatingBubbleComponent);
 
 const styles = StyleSheet.create({
   root: {

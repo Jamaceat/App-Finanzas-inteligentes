@@ -8,6 +8,7 @@ import {
   updateNextDueDate,
   updatePlannedTankRuleId,
   type CustomIntervalUnit,
+  type DbExecutor,
   type RecurringFrequency,
 } from '@/db/queries/recurring-rules';
 
@@ -40,6 +41,24 @@ export function listTransactions(
   return filtered;
 }
 
+// Solo las columnas que consume la matemática de tanques (computeIncomeTanks /
+// computeFreeCashTank / findRememberedTankId): evita cargar description y el
+// resto de la fila para toda la tabla en cada refetch del live query.
+export function listTankTransactions() {
+  return db
+    .select({
+      amount: transactions.amount,
+      kind: transactions.kind,
+      occurredAt: transactions.occurredAt,
+      recurringRuleId: transactions.recurringRuleId,
+      allocatedIncomeRuleId: transactions.allocatedIncomeRuleId,
+    })
+    .from(transactions)
+    .orderBy(desc(transactions.occurredAt));
+}
+
+export type TankTransaction = Awaited<ReturnType<typeof listTankTransactions>>[number];
+
 export function countTransactions(filter?: TransactionFilter) {
   const conditions = transactionFilterConditions(filter);
 
@@ -48,16 +67,19 @@ export function countTransactions(filter?: TransactionFilter) {
   return conditions.length > 0 ? query.where(and(...conditions)) : query;
 }
 
-export function createTransaction(input: {
-  sectionId: number;
-  amount: number;
-  kind: TransactionKind;
-  description?: string;
-  occurredAt: Date;
-  recurringRuleId?: number;
-  allocatedIncomeRuleId?: number;
-}) {
-  return db.insert(transactions).values(input).returning();
+export function createTransaction(
+  input: {
+    sectionId: number;
+    amount: number;
+    kind: TransactionKind;
+    description?: string;
+    occurredAt: Date;
+    recurringRuleId?: number;
+    allocatedIncomeRuleId?: number;
+  },
+  executor: DbExecutor = db,
+) {
+  return executor.insert(transactions).values(input).returning();
 }
 
 export function deleteTransaction(id: number) {
@@ -110,34 +132,43 @@ export async function splitAndAssignExpenseToTank(input: {
   customIntervalUnit?: CustomIntervalUnit | null;
   currentDueDate: Date;
 }) {
-  await archiveRecurringRule(input.expenseRuleId);
+  // Un solo commit para archive + 2 creates: una sola notificación de cambio.
+  return db.transaction((tx) => {
+    archiveRecurringRule(input.expenseRuleId, tx).run();
 
-  const [continuedRule] = await createRecurringRule({
-    sectionId: input.sectionId,
-    label: input.label,
-    kind: 'expense',
-    frequency: input.frequency,
-    customIntervalValue: input.customIntervalValue ?? null,
-    customIntervalUnit: input.customIntervalUnit ?? null,
-    isVariableAmount: false,
-    estimatedAmount: input.allocatedAmount,
-    nextDueDate: input.currentDueDate,
-    plannedTankRuleId: input.incomeRuleId,
+    const [continuedRule] = createRecurringRule(
+      {
+        sectionId: input.sectionId,
+        label: input.label,
+        kind: 'expense',
+        frequency: input.frequency,
+        customIntervalValue: input.customIntervalValue ?? null,
+        customIntervalUnit: input.customIntervalUnit ?? null,
+        isVariableAmount: false,
+        estimatedAmount: input.allocatedAmount,
+        nextDueDate: input.currentDueDate,
+        plannedTankRuleId: input.incomeRuleId,
+      },
+      tx,
+    ).all();
+
+    createRecurringRule(
+      {
+        sectionId: input.sectionId,
+        label: input.label,
+        kind: 'expense',
+        frequency: input.frequency,
+        customIntervalValue: input.customIntervalValue ?? null,
+        customIntervalUnit: input.customIntervalUnit ?? null,
+        isVariableAmount: false,
+        estimatedAmount: input.remainderAmount,
+        nextDueDate: input.currentDueDate,
+      },
+      tx,
+    ).run();
+
+    return continuedRule;
   });
-
-  await createRecurringRule({
-    sectionId: input.sectionId,
-    label: input.label,
-    kind: 'expense',
-    frequency: input.frequency,
-    customIntervalValue: input.customIntervalValue ?? null,
-    customIntervalUnit: input.customIntervalUnit ?? null,
-    isVariableAmount: false,
-    estimatedAmount: input.remainderAmount,
-    nextDueDate: input.currentDueDate,
-  });
-
-  return continuedRule;
 }
 
 export async function confirmRecurringOccurrences(input: {
@@ -149,27 +180,34 @@ export async function confirmRecurringOccurrences(input: {
   occurrences: { occurredAt: Date; amount: number }[];
   nextDueDate: Date;
 }) {
-  const created = [];
-  for (const occurrence of input.occurrences) {
-    const [transaction] = await createTransaction({
-      sectionId: input.sectionId,
-      amount: occurrence.amount,
-      kind: input.kind,
-      description: input.description,
-      occurredAt: occurrence.occurredAt,
-      recurringRuleId: input.ruleId,
-      allocatedIncomeRuleId: input.allocatedIncomeRuleId ?? undefined,
-    });
-    created.push(transaction);
-  }
+  // Un solo commit para los N inserts + updates de la regla: sin esto, cada await
+  // autocommitea y dispara una ola de refetch de todos los useLiveQuery montados.
+  return db.transaction((tx) => {
+    const created = [];
+    for (const occurrence of input.occurrences) {
+      const [transaction] = createTransaction(
+        {
+          sectionId: input.sectionId,
+          amount: occurrence.amount,
+          kind: input.kind,
+          description: input.description,
+          occurredAt: occurrence.occurredAt,
+          recurringRuleId: input.ruleId,
+          allocatedIncomeRuleId: input.allocatedIncomeRuleId ?? undefined,
+        },
+        tx,
+      ).all();
+      created.push(transaction);
+    }
 
-  await updateNextDueDate(input.ruleId, input.nextDueDate);
+    updateNextDueDate(input.ruleId, input.nextDueDate, tx).run();
 
-  // Recordar el tanque usado para este ciclo como plan del próximo: así el gasto ya
-  // aparece con el tanque preseleccionado la próxima vez, sin tener que reasignarlo.
-  if (input.kind === 'expense' && input.allocatedIncomeRuleId) {
-    await updatePlannedTankRuleId(input.ruleId, input.allocatedIncomeRuleId);
-  }
+    // Recordar el tanque usado para este ciclo como plan del próximo: así el gasto ya
+    // aparece con el tanque preseleccionado la próxima vez, sin tener que reasignarlo.
+    if (input.kind === 'expense' && input.allocatedIncomeRuleId) {
+      updatePlannedTankRuleId(input.ruleId, input.allocatedIncomeRuleId, tx).run();
+    }
 
-  return created;
+    return created;
+  });
 }

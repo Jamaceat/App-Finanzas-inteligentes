@@ -3,6 +3,10 @@ import { and, count, eq, isNull, like } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { recurringRules } from '@/db/schema';
 
+// El callback de db.transaction del driver expo-sqlite es síncrono: adentro hay que
+// ejecutar con .all()/.run() (no await), si no el COMMIT corre antes que las queries.
+export type DbExecutor = Pick<typeof db, 'select' | 'insert' | 'update' | 'delete'>;
+
 export type RecurringFrequency = (typeof recurringRules.$inferSelect)['frequency'];
 export type RecurringKind = (typeof recurringRules.$inferSelect)['kind'];
 export type CustomIntervalUnit = NonNullable<
@@ -46,7 +50,7 @@ export function countActiveRecurringRules(filter?: RecurringRuleFilter) {
     .where(and(...recurringRuleFilterConditions(filter)));
 }
 
-export function createRecurringRule(input: {
+export type CreateRecurringRuleInput = {
   sectionId: number;
   label: string;
   kind: RecurringKind;
@@ -58,16 +62,26 @@ export function createRecurringRule(input: {
   nextDueDate: Date;
   reminderEnabled?: boolean;
   plannedTankRuleId?: number | null;
-}) {
-  return db.insert(recurringRules).values(input).returning();
+};
+
+export function createRecurringRule(input: CreateRecurringRuleInput, executor: DbExecutor = db) {
+  return executor.insert(recurringRules).values(input).returning();
 }
 
-export function updateNextDueDate(id: number, nextDueDate: Date) {
-  return db.update(recurringRules).set({ nextDueDate }).where(eq(recurringRules.id, id)).returning();
+export function updateNextDueDate(id: number, nextDueDate: Date, executor: DbExecutor = db) {
+  return executor
+    .update(recurringRules)
+    .set({ nextDueDate })
+    .where(eq(recurringRules.id, id))
+    .returning();
 }
 
-export function updatePlannedTankRuleId(id: number, plannedTankRuleId: number | null) {
-  return db
+export function updatePlannedTankRuleId(
+  id: number,
+  plannedTankRuleId: number | null,
+  executor: DbExecutor = db,
+) {
+  return executor
     .update(recurringRules)
     .set({ plannedTankRuleId })
     .where(eq(recurringRules.id, id))
@@ -92,10 +106,20 @@ export function updateRecurringRule(
   return db.update(recurringRules).set(input).where(eq(recurringRules.id, id)).returning();
 }
 
-export function archiveRecurringRule(id: number) {
-  return db
+export function archiveRecurringRule(id: number, executor: DbExecutor = db) {
+  return executor
     .update(recurringRules)
     .set({ archivedAt: new Date() })
     .where(and(eq(recurringRules.id, id), isNull(recurringRules.archivedAt)))
     .returning();
+}
+
+// Editar una regla = archivar la anterior (preserva historial de ciclos) + crear la nueva
+// versión. Un solo commit: una sola notificación de cambio para los useLiveQuery montados.
+export async function replaceRecurringRule(archiveId: number, input: CreateRecurringRuleInput) {
+  return db.transaction((tx) => {
+    archiveRecurringRule(archiveId, tx).run();
+    const [created] = createRecurringRule(input, tx).all();
+    return created;
+  });
 }

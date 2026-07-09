@@ -1,5 +1,4 @@
-import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View, Pressable, useWindowDimensions, BackHandler } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -25,21 +24,24 @@ import {
   DUE_SOON_WINDOW_DAYS,
   OVERDUE_SEVERE_DAYS,
 } from '@/constants/constants';
-import { listActiveRecurringRules } from '@/db/queries/recurring-rules';
-import { DEFAULT_SECTION_NAME, listActiveSections } from '@/db/queries/sections';
+import { DEFAULT_SECTION_NAME } from '@/db/queries/sections';
 import {
   assignExpenseToTank,
-  listTransactions,
   splitAndAssignExpenseToTank,
   unassignExpenseFromTank,
 } from '@/db/queries/transactions';
+import {
+  useActiveRules,
+  useActiveSections,
+  useAppSettingsRows,
+  useTankTransactions,
+} from '@/providers/app-data';
 import {
   computeIncomeTanks,
   computePendingExpenses,
   computePlannedExpenses,
   type PendingExpense,
 } from '@/db/queries/tanks';
-import { watchAppSettingsRow } from '@/db/queries/settings';
 import { useBubbleFrontOrder } from '@/hooks/use-bubble-front-order';
 import { useTheme } from '@/hooks/use-theme';
 import { formatCompactCurrency, formatCurrency } from '@/lib/format';
@@ -87,10 +89,10 @@ function collectClusterTotals(nodes: BubbleNode[]): number[] {
 
 export default function AsignarGastosScreen() {
   const theme = useTheme();
-  const { data: rules } = useLiveQuery(listActiveRecurringRules());
-  const { data: transactions } = useLiveQuery(listTransactions());
-  const { data: sections } = useLiveQuery(listActiveSections());
-  const { data: settingsRows } = useLiveQuery(watchAppSettingsRow());
+  const rules = useActiveRules();
+  const transactions = useTankTransactions();
+  const sections = useActiveSections();
+  const settingsRows = useAppSettingsRows();
   const { width, height } = useWindowDimensions();
 
   const vibrationEnabled = settingsRows?.[0]?.vibrationEnabled ?? true;
@@ -174,10 +176,15 @@ export default function AsignarGastosScreen() {
   // Las burbujas son solo para gastos de reglas recurrentes: una transacción
   // puntual ya queda asignada a un tanque (o a "Libre" por defecto) al crearse
   // en el formulario, así que no necesita pasar por esta pantalla.
+  const sectionById = useMemo(
+    () => new Map((sections || []).map((section) => [section.id, section])),
+    [sections],
+  );
+
   const points: AssignablePoint[] = useMemo(() => {
     const now = new Date();
     return pendingExpenses.map((expense) => {
-      const section = (sections || []).find((s) => s.id === expense.sectionId);
+      const section = sectionById.get(expense.sectionId);
       return {
         key: `rule-${expense.ruleId}`,
         label: expense.label,
@@ -202,7 +209,7 @@ export default function AsignarGastosScreen() {
           handleAllocateRule(expense, incomeRuleId, allocatedAmount),
       };
     });
-  }, [pendingExpenses, sections]);
+  }, [pendingExpenses, sectionById]);
 
   const amountReference = useMemo(() => referenceAmount(points.map((p) => p.rawAmount)), [points]);
 
@@ -304,9 +311,15 @@ export default function AsignarGastosScreen() {
 
   const burstOrigin = expandedParentNode ? originForNode(expandedParentNode) : null;
 
-  function handlePositionChange(key: string, x: number, y: number) {
+  // Callbacks estables: FloatingExpensePoint/FloatingClusterBubble están
+  // memoizados; una referencia nueva por render anularía el memo.
+  const handlePositionChange = useCallback((key: string, x: number, y: number) => {
     setCustomPositions((prev) => ({ ...prev, [key]: { x, y } }));
-  }
+  }, []);
+
+  const handleExpandCluster = useCallback((key: string) => {
+    setExpandedPath((prev) => [...prev, key]);
+  }, []);
 
   function renderLeafNode(node: LeafNode, initial: { x: number; y: number }, dimmed: boolean) {
     const origin = originForNode(node);
@@ -335,7 +348,7 @@ export default function AsignarGastosScreen() {
         vibrationEnabled={vibrationEnabled}
         onPositionChange={handlePositionChange}
         zIndex={getZIndex(node.key)}
-        onInteractionStart={() => bringToFront(node.key)}
+        onInteractionStart={bringToFront}
         sizeScale={bubbleScale(node.point.rawAmount, amountReference, BUBBLE_PILL_SCALE_MIN, BUBBLE_PILL_SCALE_MAX)}
         urgency={node.point.urgency}
         forceDimmed={dimmed}
@@ -366,8 +379,8 @@ export default function AsignarGastosScreen() {
         isDimmed={dimmed}
         vibrationEnabled={vibrationEnabled}
         zIndex={getZIndex(node.key)}
-        onInteractionStart={() => bringToFront(node.key)}
-        onExpand={() => setExpandedPath((prev) => [...prev, node.key])}
+        onInteractionStart={bringToFront}
+        onExpand={handleExpandCluster}
         onPositionChange={handlePositionChange}
       />
     );

@@ -1,4 +1,3 @@
-import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
 import { SymbolView, type AndroidSymbol, type SFSymbol } from 'expo-symbols';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
@@ -11,10 +10,10 @@ import { useTheme } from '@/hooks/use-theme';
 import {
   archiveSection,
   createSection,
-  listActiveSections,
   updateSection,
   type SectionKind,
 } from '@/db/queries/sections';
+import { useActiveSections } from '@/providers/app-data';
 
 function symbol(ios: SFSymbol, android: AndroidSymbol) {
   return { ios, android, web: android };
@@ -63,7 +62,7 @@ const KIND_OPTIONS: { value: SectionKind; label: string }[] = [
 ];
 
 export default function SectionsScreen() {
-  const { data: sections } = useLiveQuery(listActiveSections());
+  const sections = useActiveSections();
   const [editingId, setEditingId] = useState<number | null>(null);
 
   const editingSection = sections.find((section) => section.id === editingId);

@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/immutability */
-import { useEffect, useRef } from 'react';
+import { memo, useEffect, useRef } from 'react';
 import { StyleSheet, View, Vibration, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -31,7 +31,7 @@ function symbol(ios: SFSymbol, android: AndroidSymbol) {
   return { ios, android, web: android };
 }
 
-export function FloatingClusterBubble({
+function FloatingClusterBubbleComponent({
   nodeKey,
   label,
   sublabel,
@@ -66,8 +66,8 @@ export function FloatingClusterBubble({
   isDimmed: boolean;
   vibrationEnabled: boolean;
   zIndex: number;
-  onInteractionStart: () => void;
-  onExpand: () => void;
+  onInteractionStart: (key: string) => void;
+  onExpand: (key: string) => void;
   onPositionChange: (key: string, x: number, y: number) => void;
 }) {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
@@ -150,9 +150,9 @@ export function FloatingClusterBubble({
   }
 
   const tap = Gesture.Tap().onEnd(() => {
-    runOnJS(onInteractionStart)();
+    runOnJS(onInteractionStart)(nodeKey);
     runOnJS(triggerTapVibration)();
-    runOnJS(onExpand)();
+    runOnJS(onExpand)(nodeKey);
   });
 
   const pan = Gesture.Pan()
@@ -160,7 +160,7 @@ export function FloatingClusterBubble({
       wanderX.value = withTiming(0, { duration: 150 });
       wanderY.value = withTiming(0, { duration: 150 });
       isFreeDragging.value = true;
-      runOnJS(onInteractionStart)();
+      runOnJS(onInteractionStart)(nodeKey);
     })
     .onUpdate((event) => {
       const targetX = event.translationX + originX;
@@ -188,8 +188,14 @@ export function FloatingClusterBubble({
       { translateY: translateY.value + wanderY.value },
       { scale: bubbleScaleValue.value },
     ],
-    opacity: withTiming(isDimmed ? 0.12 : 1, { duration: 250 }),
   }));
+
+  // Aparte del transform: aquel worklet corre en cada frame del wander/drag y
+  // la opacidad solo cambia con isDimmed.
+  const bubbleOpacityStyle = useAnimatedStyle(
+    () => ({ opacity: withTiming(isDimmed ? 0.12 : 1, { duration: 250 }) }),
+    [isDimmed],
+  );
 
   const urgencyColor =
     urgency === 'overdue' ? URGENCY_OVERDUE_COLOR : urgency === 'dueSoon' ? URGENCY_DUE_SOON_COLOR : null;
@@ -210,6 +216,7 @@ export function FloatingClusterBubble({
             { backgroundColor: color, shadowColor: color },
             urgencyColor ? { borderColor: urgencyColor, borderWidth: 2.5 } : null,
             bubbleStyle,
+            bubbleOpacityStyle,
           ]}
         >
           <View style={styles.countBadge}>
@@ -229,6 +236,10 @@ export function FloatingClusterBubble({
     </View>
   );
 }
+
+// Memoizado: hay hasta MAX_CLUSTERS_ON_SCREEN instancias con shared values y
+// gestos; sin memo, cualquier estado del padre las re-renderiza todas.
+export const FloatingClusterBubble = memo(FloatingClusterBubbleComponent);
 
 const styles = StyleSheet.create({
   wrapper: {

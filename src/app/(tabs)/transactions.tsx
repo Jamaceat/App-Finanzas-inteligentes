@@ -20,10 +20,15 @@ import {
   listTransactions,
   type TransactionKind,
 } from '@/db/queries/transactions';
-import { getOrCreateDefaultSection, listActiveSections } from '@/db/queries/sections';
-import { listActiveRecurringRules, listAllRecurringRules } from '@/db/queries/recurring-rules';
+import { getOrCreateDefaultSection } from '@/db/queries/sections';
+import { listAllRecurringRules } from '@/db/queries/recurring-rules';
 import { computeFreeCashTank, computeIncomeTanks, addInterval } from '@/db/queries/tanks';
-import { watchAppSettingsRow } from '@/db/queries/settings';
+import {
+  useActiveRules,
+  useActiveSections,
+  useAppSettingsRows,
+  useTankTransactions,
+} from '@/providers/app-data';
 
 function symbol(ios: SFSymbol, android: AndroidSymbol) {
   return { ios, android, web: android };
@@ -52,8 +57,8 @@ export default function TransactionsScreen() {
   const [sectionFilter, setSectionFilter] = useState<number | undefined>(undefined);
   const [searchText, setSearchText] = useState('');
 
-  const { data: sections } = useLiveQuery(listActiveSections());
-  const { data: settingsRows } = useLiveQuery(watchAppSettingsRow());
+  const sections = useActiveSections();
+  const settingsRows = useAppSettingsRows();
   const settings = settingsRows[0] ?? { tankMaxRenewalValue: 30, tankMaxRenewalUnit: 'days' as const };
   const pageSize = settingsRows[0]?.transactionsPageSize ?? TRANSACTIONS_PAGE_SIZE;
   const { data: transactionCountRows } = useLiveQuery(
@@ -74,9 +79,9 @@ export default function TransactionsScreen() {
     }),
     [sectionFilter, searchText, pagination.offset, pagination.pageSize],
   );
-  const { data: rules } = useLiveQuery(listActiveRecurringRules());
+  const rules = useActiveRules();
   const { data: allRules } = useLiveQuery(listAllRecurringRules());
-  const { data: allTransactions } = useLiveQuery(listTransactions());
+  const allTransactions = useTankTransactions();
 
   const sectionById = useMemo(
     () => new Map(sections.map((section) => [section.id, section])),

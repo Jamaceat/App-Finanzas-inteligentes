@@ -1,11 +1,9 @@
 /* eslint-disable react-hooks/immutability */
-import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
-import { Children, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, View, Modal, type LayoutChangeEvent, type GestureResponderEvent } from 'react-native';
+import { Children, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, View, Modal, type LayoutChangeEvent } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
-  Extrapolation,
   interpolate,
   runOnJS,
   runOnUI,
@@ -13,7 +11,6 @@ import Animated, {
   useAnimatedRef,
   useAnimatedScrollHandler,
   useAnimatedStyle,
-  useDerivedValue,
   useSharedValue,
   withSpring,
   withTiming,
@@ -40,20 +37,20 @@ import {
   SEARCH_PRESS_RELEASE_DURATION_MS,
   TANK_CAROUSEL_HEIGHT,
   TANK_COLOR,
-  TANK_FILL_ANIMATION_DURATION_MS,
   TANK_GAP,
   TANK_HEIGHT,
   TANK_ITEM_WIDTH,
-  TANK_LABEL_HEIGHT,
   TANK_SNAP_INTERVAL,
-  TANK_WIDTH,
 } from '@/constants/constants';
 import { useDeviceTilt } from '@/hooks/use-device-tilt';
 import { useTheme } from '@/hooks/use-theme';
-import { listActiveRecurringRules } from '@/db/queries/recurring-rules';
-import { listActiveSections } from '@/db/queries/sections';
-import { watchAppSettingsRow } from '@/db/queries/settings';
-import { listTransactions, assignExpenseToTank } from '@/db/queries/transactions';
+import { assignExpenseToTank } from '@/db/queries/transactions';
+import {
+  useActiveRules,
+  useActiveSections,
+  useAppSettingsRows,
+  useTankTransactions,
+} from '@/providers/app-data';
 import {
   addInterval,
   computeFreeCashTank,
@@ -65,10 +62,10 @@ import {
 import { formatCompactCurrency, formatCurrency } from '@/lib/format';
 
 export default function HomeScreen() {
-  const { data: rules } = useLiveQuery(listActiveRecurringRules());
-  const { data: transactions } = useLiveQuery(listTransactions());
-  const { data: sections } = useLiveQuery(listActiveSections());
-  const { data: settingsRows } = useLiveQuery(watchAppSettingsRow());
+  const rules = useActiveRules();
+  const transactions = useTankTransactions();
+  const sections = useActiveSections();
+  const settingsRows = useAppSettingsRows();
   const settings = settingsRows[0] ?? { tankMaxRenewalValue: 30, tankMaxRenewalUnit: 'days' as const };
   const tilt = useDeviceTilt();
   const theme = useTheme();
@@ -208,6 +205,11 @@ export default function HomeScreen() {
     return sections.filter((section) => usedSectionIds.has(section.id));
   }, [sections, incomeTanks]);
 
+  const sectionById = useMemo(
+    () => new Map((sections || []).map((section) => [section.id, section])),
+    [sections],
+  );
+
   const filteredIncomeTanks = useMemo(
     () =>
       selectedSectionId === null
@@ -223,16 +225,15 @@ export default function HomeScreen() {
     });
   }
 
-  function confirmAllocate(expense: PendingExpense, tank: IncomeTank) {
-    Alert.alert(
-      'Asignar gasto',
-      `¿Asignar "${expense.label}" al tanque "${tank.label}"? Vas a poder confirmar el pago después en la pestaña Confirmar.`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        { text: 'Asignar', onPress: () => handleAllocate(expense, tank) },
-      ],
-    );
-  }
+  // Callbacks estables para PendingExpenseCard (memoizado): una referencia
+  // nueva por render anularía el memo de todas las cards.
+  const handleSelectTankIndex = useCallback((ruleId: number, index: number) => {
+    setExpenseTankIndices((prev) => ({ ...prev, [ruleId]: index }));
+  }, []);
+
+  const handlePressExpense = useCallback((expense: PendingExpense) => {
+    setFocusedExpense(expense);
+  }, []);
 
   return (
     <GestureHandlerRootView style={styles.gestureRoot}>
@@ -323,26 +324,17 @@ export default function HomeScreen() {
                 </ThemedText>
               )}
               <View style={styles.pendingList}>
-                {pendingExpenses.map((expense) => {
-                  const currentTankIndex = expenseTankIndices[expense.ruleId] ?? 0;
-                  const section = (sections || []).find((s) => s.id === expense.sectionId);
-                  return (
-                    <PendingExpenseCard
-                      key={expense.ruleId}
-                      expense={expense}
-                      tanks={incomeTanks}
-                      section={section}
-                      tankIndex={currentTankIndex}
-                      onSelectTankIndex={(newIdx) => {
-                        setExpenseTankIndices((prev) => ({ ...prev, [expense.ruleId]: newIdx }));
-                      }}
-                      onPress={() => {
-                        setFocusedExpense(expense);
-                      }}
-                      onDropOnTank={(tank) => confirmAllocate(expense, tank)}
-                    />
-                  );
-                })}
+                {pendingExpenses.map((expense) => (
+                  <PendingExpenseCard
+                    key={expense.ruleId}
+                    expense={expense}
+                    tanks={incomeTanks}
+                    section={sectionById.get(expense.sectionId)}
+                    tankIndex={expenseTankIndices[expense.ruleId] ?? 0}
+                    onSelectTankIndex={handleSelectTankIndex}
+                    onPress={handlePressExpense}
+                  />
+                ))}
               </View>
             </View>
           </ScrollView>
@@ -363,7 +355,7 @@ export default function HomeScreen() {
         {focusedExpense && (() => {
         const hasTanks = incomeTanks.length > 0;
         const currentTankIndex = expenseTankIndices[focusedExpense.ruleId] ?? 0;
-        const focusedSection = (sections || []).find((s) => s.id === focusedExpense.sectionId);
+        const focusedSection = sectionById.get(focusedExpense.sectionId);
         
         return (
           <Modal
@@ -697,22 +689,20 @@ function CoverflowItem({
 
 
 
-function PendingExpenseCard({
+function PendingExpenseCardComponent({
   expense,
   tanks,
   section,
   tankIndex,
   onSelectTankIndex,
   onPress,
-  onDropOnTank,
 }: {
   expense: PendingExpense;
   tanks: IncomeTank[];
   section?: { name: string; color: string; icon: string };
   tankIndex: number;
-  onSelectTankIndex: (index: number) => void;
-  onPress: () => void;
-  onDropOnTank: (tank: IncomeTank) => void;
+  onSelectTankIndex: (ruleId: number, index: number) => void;
+  onPress: (expense: PendingExpense) => void;
 }) {
   const theme = useTheme();
   const translateX = useSharedValue(0);
@@ -722,7 +712,11 @@ function PendingExpenseCard({
   function selectTank(direction: 1 | -1) {
     if (!hasTanks) return;
     const nextIdx = (tankIndex + direction + tanks.length) % tanks.length;
-    onSelectTankIndex(nextIdx);
+    onSelectTankIndex(expense.ruleId, nextIdx);
+  }
+
+  function handlePress() {
+    onPress(expense);
   }
 
   const pan = Gesture.Pan()
@@ -738,7 +732,7 @@ function PendingExpenseCard({
       } else if (event.translationX < -threshold) {
         runOnJS(selectTank)(-1);
       } else if (Math.abs(event.translationX) < 10) {
-        runOnJS(onPress)();
+        runOnJS(handlePress)();
       }
       translateX.value = withSpring(0);
     });
@@ -763,7 +757,7 @@ function PendingExpenseCard({
           onPressOut={() => {
             cardScale.value = withTiming(1, { duration: 100 });
           }}
-          onPress={onPress}
+          onPress={handlePress}
         >
           <ThemedView type="backgroundElement" style={styles.pendingCard}>
             {/* Left: Section Icon Badge */}
@@ -823,6 +817,10 @@ function PendingExpenseCard({
     </GestureDetector>
   );
 }
+
+// Memoizada: hay una card por gasto pendiente, cada una con gesto y shared
+// values; sin memo, cualquier estado de HomeScreen las re-renderiza todas.
+const PendingExpenseCard = memo(PendingExpenseCardComponent);
 
 const styles = StyleSheet.create({
   gestureRoot: {

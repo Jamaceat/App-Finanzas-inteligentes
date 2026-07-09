@@ -1,4 +1,3 @@
-import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
 import { useMemo, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -7,13 +6,8 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { listActiveRecurringRules } from '@/db/queries/recurring-rules';
-import { listActiveSections } from '@/db/queries/sections';
-import {
-  confirmRecurringOccurrences,
-  listTransactions,
-  type TransactionKind,
-} from '@/db/queries/transactions';
+import { confirmRecurringOccurrences, type TransactionKind } from '@/db/queries/transactions';
+import { useActiveRules, useActiveSections, useTankTransactions } from '@/providers/app-data';
 import {
   computeIncomeTanks,
   computePendingConfirmations,
@@ -49,9 +43,9 @@ function findRememberedTankId(
 
 export default function ConfirmarScreen() {
   const [kind, setKind] = useState<TransactionKind>('income');
-  const { data: rules } = useLiveQuery(listActiveRecurringRules());
-  const { data: transactions } = useLiveQuery(listTransactions());
-  const { data: sections } = useLiveQuery(listActiveSections());
+  const rules = useActiveRules();
+  const transactions = useTankTransactions();
+  const sections = useActiveSections();
 
   const [activeConfirmation, setActiveConfirmation] = useState<PendingConfirmation | null>(null);
 
