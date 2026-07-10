@@ -1,4 +1,4 @@
-.PHONY: help install start start-tunnel android web clean reset dev-reset prebuild local-apk local-apk-rebuild local-apk-clean eas-login eas-config eas-apk eas-aab adb-reverse start-tablet open-tablet screenshot logs wsl-usb
+.PHONY: help install start start-tunnel android web clean clean-tmp-cache reset dev-reset prebuild local-apk local-apk-rebuild local-apk-clean eas-login eas-config eas-apk eas-aab adb-reverse start-tablet open-tablet screenshot logs wsl-usb wireless-pair wireless-connect
 
 # Puerto para depuración móvil (configurable vía: make <target> PORT=xxxx)
 PORT ?= 8082
@@ -16,7 +16,7 @@ RESET = \033[0m
 
 help:
 	@echo "================================================================="
-	@echo "  $(BLUE)GymSmart - Comandos para Desarrollo y Construcción$(RESET)"
+	@echo "  $(BLUE)Desarrollo Movil - Comandos para Desarrollo y Construcción$(RESET)"
 	@echo "================================================================="
 	@echo "Uso: make <comando>"
 	@echo ""
@@ -31,7 +31,10 @@ help:
 	@echo "  open-tablet      Abre la aplicación en la tablet conectada por USB (abre Expo Go)"
 	@echo "  screenshot       Toma una captura de pantalla del dispositivo y la guarda en screenshot/screenshot.png"
 	@echo "  wsl-usb          Muestra los comandos de PowerShell para conectar USB a WSL"
+	@echo "  wireless-pair    Empareja adb inalámbrico con los datos de .env (CODIGO_LAN/IP/PUERTO)"
+	@echo "  wireless-connect Conecta adb inalámbrico con PUERTO_DEPURACION (empareja primero solo si ACTIVE != TRUE en .env)"
 	@echo "  clean            Limpia la caché del empaquetador Metro y Expo"
+	@echo "  clean-tmp-cache  Borra la caché de Metro en /tmp (arregla 'EACCES' si quedó con dueño root, pide sudo)"
 	@echo "  reset            Ejecuta el script de reinicio del proyecto"
 	@echo "  dev-reset        Reinicio completo: mata Metro, fuerza el cierre de la app en el dispositivo, limpia cachés y reinicia con -c"
 	@echo ""
@@ -96,6 +99,11 @@ clean:
 	rm -rf dist
 	@echo "$(GREEN)Limpieza completada.$(RESET)"
 
+clean-tmp-cache:
+	@echo "$(BLUE)Borrando caché de Metro en /tmp (puede pedir tu contraseña de sudo)...$(RESET)"
+	sudo rm -rf /tmp/metro-cache /tmp/metro-file-map-expo-*
+	@echo "$(GREEN)Caché de /tmp eliminada. Volvé a correr 'make start' o 'make start-tunnel'.$(RESET)"
+
 reset:
 	@echo "$(BLUE)Ejecutando reinicio completo...$(RESET)"
 	$(PACKAGE_MANAGER) run reset-project
@@ -152,6 +160,14 @@ eas-apk:
 eas-aab:
 	@echo "$(BLUE)Enviando compilación a la nube de Expo (AAB - Production)...$(RESET)"
 	npx eas build --platform android --profile production
+
+wireless-pair:
+	@chmod +x scripts/adb-wireless.sh
+	@scripts/adb-wireless.sh pair
+
+wireless-connect:
+	@chmod +x scripts/adb-wireless.sh
+	@scripts/adb-wireless.sh connect
 
 wsl-usb:
 	@echo "================================================================="
