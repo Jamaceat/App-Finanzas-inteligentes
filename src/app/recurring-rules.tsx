@@ -1,6 +1,6 @@
 import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
 import { useLocalSearchParams } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { SymbolView, type AndroidSymbol, type SFSymbol } from 'expo-symbols';
@@ -32,6 +32,7 @@ import {
   computeIncomeTanks,
   computePendingConfirmations,
   computeSpecialTanks,
+  getCycleWindow,
   type PendingConfirmation,
 } from '@/db/queries/tanks';
 import {
@@ -88,6 +89,7 @@ type Rule = {
   nextDueDate: Date;
   reminderEnabled: boolean;
   createdAt: Date;
+  previousRuleId: number | null;
 };
 
 const createdAtFormatter = new Intl.DateTimeFormat('es-AR', {
@@ -336,6 +338,50 @@ function RuleForm({
   const formattedAmount = formatCurrencyInput(amountDigits);
   const customValueNumber = Math.max(1, Number(customValue) || 1);
 
+  const originalStartDate = useMemo(() => {
+    if (!editing) return undefined;
+
+    const lineageIds = new Set<number>();
+    let currId: number | null = editing.id;
+    let oldestRule = editing;
+
+    while (currId !== null && !lineageIds.has(currId)) {
+      lineageIds.add(currId);
+      const rule = allRules.find((r) => r.id === currId);
+      if (rule) {
+        oldestRule = rule;
+        currId = rule.previousRuleId ?? null;
+      } else {
+        break;
+      }
+    }
+
+    const lineageTransactions = transactions.filter(
+      (t) => t.recurringRuleId !== null && lineageIds.has(t.recurringRuleId),
+    );
+
+    let minDate = new Date(oldestRule.nextDueDate);
+    for (const t of lineageTransactions) {
+      const occDate = new Date(t.occurredAt);
+      if (occDate < minDate) {
+        minDate = occDate;
+      }
+    }
+
+    return minDate;
+  }, [editing, allRules, transactions]);
+
+  useEffect(() => {
+    if (originalStartDate) {
+      setStartDate(originalStartDate);
+    }
+  }, [originalStartDate]);
+
+  const cycleWindow = useMemo(() => {
+    if (!editing) return undefined;
+    return getCycleWindow(editing);
+  }, [editing]);
+
   // Memoizado: sin esto se re-simulan todas las ocurrencias (y se re-renderiza
   // el MiniCalendar con array nuevo) en cada tecleo del formulario.
   const upcomingDates = useMemo(
@@ -388,6 +434,10 @@ function RuleForm({
 
     let created;
     if (editing) {
+      const hasChangedStartDate =
+        originalStartDate && startDate.getTime() !== originalStartDate.getTime();
+      const nextDueDateToSave = hasChangedStartDate ? startDate : editing.nextDueDate;
+
       // Desactivar regla anterior (preserva el historial) y crear la nueva versión,
       // en una sola transacción/commit.
       created = await replaceRecurringRule(editing.id, {
@@ -399,7 +449,7 @@ function RuleForm({
         customIntervalUnit: isCustom ? customUnit : null,
         isVariableAmount,
         estimatedAmount: estimatedAmount ?? undefined,
-        nextDueDate: startDate,
+        nextDueDate: nextDueDateToSave,
         reminderEnabled,
       });
     } else {
@@ -540,13 +590,38 @@ function RuleForm({
         <ThemedText type="small" themeColor="textSecondary">
           Punto de partida
         </ThemedText>
+
+        <View style={styles.calendarLegend}>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendCircle, { backgroundColor: theme.backgroundSelected, borderWidth: 1, borderColor: theme.backgroundSelected }]} />
+            <ThemedText type="small" themeColor="textSecondary">Inicio</ThemedText>
+          </View>
+          {editing && (
+            <View style={styles.legendItem}>
+              <View style={[styles.legendCircle, { borderWidth: 2, borderColor: '#0091FF', backgroundColor: 'rgba(0, 145, 255, 0.18)' }]} />
+              <ThemedText type="small" themeColor="textSecondary">Ciclo actual</ThemedText>
+            </View>
+          )}
+          <View style={styles.legendItem}>
+            <View style={[styles.legendCircle, { borderWidth: 1.5, borderColor: kind === 'income' ? '#30A46C' : '#E5484D', backgroundColor: 'transparent' }]} />
+            <ThemedText type="small" themeColor="textSecondary">
+              {kind === 'income' ? 'Ingresos' : 'Gastos'}
+            </ThemedText>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: '#0091FF' }]} />
+            <ThemedText type="small" themeColor="textSecondary">Hoy</ThemedText>
+          </View>
+        </View>
+
         <MiniCalendar
           value={startDate}
           onChange={setStartDate}
           highlightDates={upcomingDates}
           highlightColor={kind === 'income' ? '#30A46C' : '#E5484D'}
           minDate={restrictPastStartDates ? startOfToday() : undefined}
-          originStartDate={editing?.nextDueDate}
+          cycleStart={cycleWindow?.start}
+          cycleEnd={cycleWindow?.end}
         />
 
         <View style={styles.formActions}>
@@ -629,14 +704,16 @@ function MiniCalendar({
   highlightDates,
   highlightColor,
   minDate,
-  originStartDate,
+  cycleStart,
+  cycleEnd,
 }: {
   value: Date;
   onChange: (date: Date) => void;
   highlightDates: Date[];
   highlightColor: string;
   minDate?: Date;
-  originStartDate?: Date;
+  cycleStart?: Date;
+  cycleEnd?: Date;
 }) {
   const theme = useTheme();
   const [viewDate, setViewDate] = useState(new Date(value.getFullYear(), value.getMonth(), 1));
@@ -671,9 +748,9 @@ function MiniCalendar({
     setViewDate(new Date(today.getFullYear(), today.getMonth(), 1));
   }
 
-  function goToOrigin() {
-    if (!originStartDate) return;
-    setViewDate(new Date(originStartDate.getFullYear(), originStartDate.getMonth(), 1));
+  function goToCycleStart() {
+    if (!cycleStart) return;
+    setViewDate(new Date(cycleStart.getFullYear(), cycleStart.getMonth(), 1));
   }
 
   const gridWidth = containerWidth > 0 ? Math.round(containerWidth - Spacing.two * 2) : 0;
@@ -724,9 +801,9 @@ function MiniCalendar({
             Hoy
           </ThemedText>
         </Pressable>
-        {originStartDate && (
+        {cycleStart && (
           <Pressable
-            onPress={goToOrigin}
+            onPress={goToCycleStart}
             style={({ pressed }) => [styles.todayButton, pressed && styles.pressed]}
           >
             <ThemedText type="small" themeColor="textSecondary">
@@ -755,8 +832,30 @@ function MiniCalendar({
           const isSelected = isSameDay(date, value);
           const isHighlighted = !isSelected && highlightDayKeys.has(dayKey(date));
           const isDisabled = minDate != null && date < minDate && !isSameDay(date, minDate);
-          const isOrigin = originStartDate != null && isSameDay(date, originStartDate);
+          const isCycleStart = cycleStart != null && isSameDay(date, cycleStart);
+          const isCycleEnd = cycleEnd != null && isSameDay(date, cycleEnd);
+          const isCycleBoundary = isCycleStart || isCycleEnd;
           const isToday = isSameDay(date, new Date());
+
+          const isInsideCycle =
+            cycleStart != null &&
+            cycleEnd != null &&
+            date >= cycleStart &&
+            date <= cycleEnd;
+
+          let leftValue: any = 0;
+          let rightValue: any = 0;
+          let showBar = isInsideCycle;
+
+          if (isCycleStart && isCycleEnd) {
+            showBar = false;
+          } else if (isCycleStart) {
+            leftValue = '50%';
+            rightValue = 0;
+          } else if (isCycleEnd) {
+            leftValue = 0;
+            rightValue = '50%';
+          }
 
           return (
             <Pressable
@@ -765,22 +864,34 @@ function MiniCalendar({
               onPress={() => onChange(date)}
               style={({ pressed }) => [styles.calendarCell, cellStyle, pressed && styles.pressed]}
             >
+              {showBar && (
+                <View
+                  style={{
+                    position: 'absolute',
+                    top: '10%',
+                    bottom: '10%',
+                    left: leftValue,
+                    right: rightValue,
+                    backgroundColor: 'rgba(0, 145, 255, 0.18)',
+                  }}
+                />
+              )}
               <View
                 style={[
                   styles.calendarDay,
                   dayStyle,
                   {
-                    backgroundColor: isOrigin && !isSelected
+                    backgroundColor: isCycleBoundary && !isSelected
                       ? ORIGIN_COLOR
                       : isSelected
                         ? theme.backgroundSelected
                         : 'transparent',
-                    borderColor: isOrigin
+                    borderColor: isCycleBoundary
                       ? ORIGIN_COLOR
                       : isHighlighted
                         ? highlightColor
                         : 'transparent',
-                    borderWidth: isOrigin ? 2.5 : 1.5,
+                    borderWidth: isCycleBoundary ? 2.5 : 1.5,
                     opacity: isDisabled ? 0.3 : 1,
                   },
                 ]}
@@ -788,8 +899,8 @@ function MiniCalendar({
                 <ThemedText
                   type="small"
                   style={[
-                    isOrigin && !isSelected ? styles.originDayText : undefined,
-                    isToday && !isSelected && !isOrigin ? { fontWeight: 'bold' } : undefined,
+                    isCycleBoundary && !isSelected ? styles.originDayText : undefined,
+                    isToday && !isSelected && !isCycleBoundary ? { fontWeight: 'bold' } : undefined,
                   ]}
                 >
                   {date.getDate()}
@@ -802,7 +913,7 @@ function MiniCalendar({
                       width: 4,
                       height: 4,
                       borderRadius: 2,
-                      backgroundColor: isOrigin && !isSelected
+                      backgroundColor: isCycleBoundary && !isSelected
                         ? '#ffffff'
                         : isSelected
                           ? theme.text
@@ -1002,5 +1113,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
+  },
+  calendarLegend: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+    paddingHorizontal: Spacing.one,
+    marginBottom: Spacing.one,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.half,
+  },
+  legendCircle: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  legendDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginHorizontal: 3,
   },
 });
