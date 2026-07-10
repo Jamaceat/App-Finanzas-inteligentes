@@ -343,13 +343,13 @@ function RuleForm({
 
     const lineageIds = new Set<number>();
     let currId: number | null = editing.id;
-    let oldestRule = editing;
+    const lineageRules: Rule[] = [];
 
     while (currId !== null && !lineageIds.has(currId)) {
       lineageIds.add(currId);
       const rule = allRules.find((r) => r.id === currId);
       if (rule) {
-        oldestRule = rule;
+        lineageRules.push(rule);
         currId = rule.previousRuleId ?? null;
       } else {
         break;
@@ -360,7 +360,14 @@ function RuleForm({
       (t) => t.recurringRuleId !== null && lineageIds.has(t.recurringRuleId),
     );
 
-    let minDate = new Date(oldestRule.nextDueDate);
+    let minDate = new Date(editing.nextDueDate);
+    for (const r of lineageRules) {
+      const d = new Date(r.nextDueDate);
+      if (d < minDate) {
+        minDate = d;
+      }
+    }
+
     for (const t of lineageTransactions) {
       const occDate = new Date(t.occurredAt);
       if (occDate < minDate) {
@@ -598,7 +605,7 @@ function RuleForm({
           </View>
           {editing && (
             <View style={styles.legendItem}>
-              <View style={[styles.legendCircle, { borderWidth: 2, borderColor: '#0091FF', backgroundColor: 'rgba(0, 145, 255, 0.18)' }]} />
+              <View style={[styles.legendCircle, { borderWidth: 2, borderColor: '#0091FF', backgroundColor: theme.backgroundRecurringFixed }]} />
               <ThemedText type="small" themeColor="textSecondary">Ciclo actual</ThemedText>
             </View>
           )}
@@ -622,6 +629,7 @@ function RuleForm({
           minDate={restrictPastStartDates ? startOfToday() : undefined}
           cycleStart={cycleWindow?.start}
           cycleEnd={cycleWindow?.end}
+          originalStartDate={originalStartDate}
         />
 
         <View style={styles.formActions}>
@@ -706,6 +714,7 @@ function MiniCalendar({
   minDate,
   cycleStart,
   cycleEnd,
+  originalStartDate,
 }: {
   value: Date;
   onChange: (date: Date) => void;
@@ -714,6 +723,7 @@ function MiniCalendar({
   minDate?: Date;
   cycleStart?: Date;
   cycleEnd?: Date;
+  originalStartDate?: Date;
 }) {
   const theme = useTheme();
   const [viewDate, setViewDate] = useState(new Date(value.getFullYear(), value.getMonth(), 1));
@@ -743,14 +753,28 @@ function MiniCalendar({
     setViewDate(new Date(year, month + delta, 1));
   }
 
-  function goToToday() {
-    const today = new Date();
+  function handleGoToToday() {
+    const today = startOfToday();
+    onChange(today);
     setViewDate(new Date(today.getFullYear(), today.getMonth(), 1));
   }
 
-  function goToCycleStart() {
+  function handleGoToOriginalStart() {
+    if (!originalStartDate) return;
+    onChange(originalStartDate);
+    setViewDate(new Date(originalStartDate.getFullYear(), originalStartDate.getMonth(), 1));
+  }
+
+  function handleGoToCycleStart() {
     if (!cycleStart) return;
+    onChange(cycleStart);
     setViewDate(new Date(cycleStart.getFullYear(), cycleStart.getMonth(), 1));
+  }
+
+  function handleGoToCycleEnd() {
+    if (!cycleEnd) return;
+    onChange(cycleEnd);
+    setViewDate(new Date(cycleEnd.getFullYear(), cycleEnd.getMonth(), 1));
   }
 
   const gridWidth = containerWidth > 0 ? Math.round(containerWidth - Spacing.two * 2) : 0;
@@ -794,20 +818,40 @@ function MiniCalendar({
 
       <View style={styles.calendarActionsRow}>
         <Pressable
-          onPress={goToToday}
+          onPress={handleGoToToday}
           style={({ pressed }) => [styles.todayButton, pressed && styles.pressed]}
         >
           <ThemedText type="small" themeColor="textSecondary">
             Hoy
           </ThemedText>
         </Pressable>
-        {cycleStart && (
+        {originalStartDate && (
           <Pressable
-            onPress={goToCycleStart}
+            onPress={handleGoToOriginalStart}
             style={({ pressed }) => [styles.todayButton, pressed && styles.pressed]}
           >
             <ThemedText type="small" themeColor="textSecondary">
-              Inicio del ciclo
+              Inicio ciclo origen
+            </ThemedText>
+          </Pressable>
+        )}
+        {cycleStart && (
+          <Pressable
+            onPress={handleGoToCycleStart}
+            style={({ pressed }) => [styles.todayButton, pressed && styles.pressed]}
+          >
+            <ThemedText type="small" themeColor="textSecondary">
+              Inicio ciclo
+            </ThemedText>
+          </Pressable>
+        )}
+        {cycleEnd && (
+          <Pressable
+            onPress={handleGoToCycleEnd}
+            style={({ pressed }) => [styles.todayButton, pressed && styles.pressed]}
+          >
+            <ThemedText type="small" themeColor="textSecondary">
+              Final ciclo
             </ThemedText>
           </Pressable>
         )}
@@ -882,7 +926,7 @@ function MiniCalendar({
                   dayStyle,
                   {
                     backgroundColor: isCycleBoundary && !isSelected
-                      ? ORIGIN_COLOR
+                      ? theme.backgroundRecurringFixed
                       : isSelected
                         ? theme.backgroundSelected
                         : 'transparent',
@@ -899,7 +943,7 @@ function MiniCalendar({
                 <ThemedText
                   type="small"
                   style={[
-                    isCycleBoundary && !isSelected ? styles.originDayText : undefined,
+                    isCycleBoundary && !isSelected ? { fontWeight: 'bold' } : undefined,
                     isToday && !isSelected && !isCycleBoundary ? { fontWeight: 'bold' } : undefined,
                   ]}
                 >
@@ -913,11 +957,9 @@ function MiniCalendar({
                       width: 4,
                       height: 4,
                       borderRadius: 2,
-                      backgroundColor: isCycleBoundary && !isSelected
-                        ? '#ffffff'
-                        : isSelected
-                          ? theme.text
-                          : ORIGIN_COLOR,
+                      backgroundColor: isSelected
+                        ? theme.text
+                        : ORIGIN_COLOR,
                     }}
                   />
                 )}
@@ -1080,6 +1122,7 @@ const styles = StyleSheet.create({
   },
   calendarActionsRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: Spacing.one,
