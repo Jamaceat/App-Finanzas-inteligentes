@@ -346,6 +346,11 @@ export function ConfirmationModal({
               </View>
             ))}
 
+            <View style={styles.totalRow}>
+              <ThemedText type="smallBold">Total</ThemedText>
+              <ThemedText type="smallBold">{currencyFormatter.format(totalAmount)}</ThemedText>
+            </View>
+
             {needsTankChoice && (
               <View style={styles.tankSection}>
                 <ThemedText type="small" themeColor="textSecondary">
@@ -522,6 +527,13 @@ const styles = StyleSheet.create({
     borderRadius: Spacing.two,
     fontSize: 15,
     textAlign: 'right',
+  },
+  totalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingTop: Spacing.two,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#8888884D',
   },
   tankSection: {
     gap: Spacing.two,
