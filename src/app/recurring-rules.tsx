@@ -454,8 +454,7 @@ function RuleForm({
 
     let created;
     if (editing) {
-      const hasChangedStartDate =
-        originalStartDate && startDate.getTime() !== originalStartDate.getTime();
+      const hasChangedStartDate = startDate.getTime() !== editing.nextDueDate.getTime();
       const nextDueDateToSave = hasChangedStartDate ? startDate : editing.nextDueDate;
 
       // Desactivar regla anterior (preserva el historial) y crear la nueva versión,
