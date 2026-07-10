@@ -80,6 +80,7 @@ export function ConfirmationModal({
   transactions,
   allRules,
   onClose,
+  cancelLabel = 'Cancelar',
 }: {
   confirmation: PendingConfirmation;
   incomeTanks: IncomeTank[];
@@ -88,6 +89,7 @@ export function ConfirmationModal({
   transactions: { recurringRuleId: number | null; allocatedIncomeRuleId: number | null; occurredAt: Date }[];
   allRules: { id: number; previousRuleId: number | null; nextDueDate: Date; frequency: any; customIntervalValue?: number | null; customIntervalUnit?: any }[];
   onClose: () => void;
+  cancelLabel?: string;
 }) {
   const theme = useTheme();
   const isExpense = confirmation.kind === 'expense';
@@ -448,7 +450,7 @@ export function ConfirmationModal({
             <View style={styles.modalActions}>
               <Pressable onPress={onClose} style={({ pressed }) => pressed && styles.pressed}>
                 <ThemedView type="background" style={styles.modalButton}>
-                  <ThemedText type="small">Cancelar</ThemedText>
+                  <ThemedText type="small">{cancelLabel}</ThemedText>
                 </ThemedView>
               </Pressable>
               <Pressable

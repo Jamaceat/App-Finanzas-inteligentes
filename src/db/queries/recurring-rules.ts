@@ -14,6 +14,15 @@ export type CustomIntervalUnit = NonNullable<
 >;
 export type TankKind = (typeof recurringRules.$inferSelect)['tankKind'];
 
+// nextDueDate es solo una fecha de ciclo (la unidad mínima es el día): se normaliza a
+// medianoche hora local en cada write para que no arrastre la hora exacta en la que se
+// creó/editó/avanzó la regla (eso rompía las comparaciones de "vencido" contra `now`,
+// corriendo el vencimiento real a esa hora del día en vez de al inicio del día). El
+// instante exacto del cambio se audita aparte en `updatedAt`.
+function startOfDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
 export type RecurringRuleFilter = {
   kind?: RecurringKind;
   search?: string;
@@ -77,13 +86,16 @@ export type CreateRecurringRuleInput = {
 };
 
 export function createRecurringRule(input: CreateRecurringRuleInput, executor: DbExecutor = db) {
-  return executor.insert(recurringRules).values(input).returning();
+  return executor
+    .insert(recurringRules)
+    .values({ ...input, nextDueDate: startOfDay(input.nextDueDate), updatedAt: new Date() })
+    .returning();
 }
 
 export function updateNextDueDate(id: number, nextDueDate: Date, executor: DbExecutor = db) {
   return executor
     .update(recurringRules)
-    .set({ nextDueDate })
+    .set({ nextDueDate: startOfDay(nextDueDate), updatedAt: new Date() })
     .where(eq(recurringRules.id, id))
     .returning();
 }
@@ -95,7 +107,7 @@ export function updatePlannedTankRuleId(
 ) {
   return executor
     .update(recurringRules)
-    .set({ plannedTankRuleId })
+    .set({ plannedTankRuleId, updatedAt: new Date() })
     .where(eq(recurringRules.id, id))
     .returning();
 }
@@ -115,7 +127,15 @@ export function updateRecurringRule(
     reminderEnabled: boolean;
   }>,
 ) {
-  return db.update(recurringRules).set(input).where(eq(recurringRules.id, id)).returning();
+  return db
+    .update(recurringRules)
+    .set({
+      ...input,
+      nextDueDate: input.nextDueDate ? startOfDay(input.nextDueDate) : undefined,
+      updatedAt: new Date(),
+    })
+    .where(eq(recurringRules.id, id))
+    .returning();
 }
 
 // Los tanques especiales viven en recurring_rules (kind='income', tankKind='special')
@@ -139,10 +159,11 @@ export function createSpecialTank(
       customIntervalUnit: 'days',
       isVariableAmount: false,
       estimatedAmount: input.capacity,
-      nextDueDate: input.expiresAt,
+      nextDueDate: startOfDay(input.expiresAt),
       reminderEnabled: false,
       tankKind: 'special',
       specialTankExpenseId: input.expenseRuleId,
+      updatedAt: new Date(),
     })
     .returning();
 }
@@ -156,7 +177,11 @@ export function updateSpecialTank(
 ) {
   return executor
     .update(recurringRules)
-    .set({ estimatedAmount: input.capacity, nextDueDate: input.expiresAt })
+    .set({
+      estimatedAmount: input.capacity,
+      nextDueDate: startOfDay(input.expiresAt),
+      updatedAt: new Date(),
+    })
     .where(eq(recurringRules.id, id))
     .returning();
 }
@@ -168,11 +193,11 @@ export function pruneExpiredSpecialTanks(ids: number[]) {
   if (ids.length === 0) return;
   return db.transaction((tx) => {
     tx.update(recurringRules)
-      .set({ plannedTankRuleId: null })
+      .set({ plannedTankRuleId: null, updatedAt: new Date() })
       .where(inArray(recurringRules.plannedTankRuleId, ids))
       .run();
     tx.update(recurringRules)
-      .set({ archivedAt: new Date() })
+      .set({ archivedAt: new Date(), updatedAt: new Date() })
       .where(inArray(recurringRules.id, ids))
       .run();
   });
@@ -181,7 +206,7 @@ export function pruneExpiredSpecialTanks(ids: number[]) {
 export function archiveRecurringRule(id: number, executor: DbExecutor = db) {
   return executor
     .update(recurringRules)
-    .set({ archivedAt: new Date() })
+    .set({ archivedAt: new Date(), updatedAt: new Date() })
     .where(and(eq(recurringRules.id, id), isNull(recurringRules.archivedAt)))
     .returning();
 }

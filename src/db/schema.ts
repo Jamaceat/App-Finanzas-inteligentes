@@ -78,6 +78,12 @@ export const recurringRules = sqliteTable(
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),
+    // Auditoría del momento exacto (con hora) del último create/update. A diferencia
+    // de nextDueDate -que es solo una fecha de ciclo, sin hora relevante-, este campo
+    // sí guarda el instante real en que se tocó la fila.
+    updatedAt: integer('updated_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
   },
   (table) => [index('recurring_rules_archived_at_idx').on(table.archivedAt)],
 );

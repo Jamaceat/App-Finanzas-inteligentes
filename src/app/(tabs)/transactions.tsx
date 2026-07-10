@@ -8,10 +8,11 @@ import { SymbolView, type AndroidSymbol, type SFSymbol } from 'expo-symbols';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { TankSearchModal, type SearchTankItem } from '@/components/tank-search-modal';
+import { TransactionDetailModal, type TransactionDetailData } from '@/components/transaction-detail-modal';
 import { PaginationControls } from '@/components/pagination-controls';
 import { FilterChip } from '@/components/filter-chip';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
-import { FREE_TANK_COLOR, TANK_COLOR } from '@/constants/constants';
+import { FREE_TANK_COLOR, SPECIAL_TANK_COLOR, TANK_COLOR } from '@/constants/constants';
 import { useTheme } from '@/hooks/use-theme';
 import { usePagination } from '@/hooks/use-pagination';
 import {
@@ -132,6 +133,62 @@ export default function TransactionsScreen() {
     [incomeTanks],
   );
 
+  function resolveTankInfo(tankRuleId: number | null): { label: string; color: string } {
+    if (tankRuleId === null) {
+      return { label: 'Libre', color: FREE_TANK_COLOR };
+    }
+    const activeLabel = tankLabelByRuleId.get(tankRuleId);
+    if (activeLabel !== undefined) {
+      return { label: activeLabel, color: TANK_COLOR };
+    }
+    const rule = ruleById.get(tankRuleId);
+    if (rule) {
+      return { label: rule.label, color: rule.tankKind === 'special' ? SPECIAL_TANK_COLOR : TANK_COLOR };
+    }
+    return { label: 'Libre', color: FREE_TANK_COLOR };
+  }
+
+  const [selectedTransactionId, setSelectedTransactionId] = useState<number | null>(null);
+  const selectedTransaction = useMemo(
+    () => transactions.find((transaction) => transaction.id === selectedTransactionId) ?? null,
+    [transactions, selectedTransactionId],
+  );
+  const selectedDetail: TransactionDetailData | null = useMemo(() => {
+    if (!selectedTransaction) return null;
+    const isExpense = selectedTransaction.kind === 'expense';
+    const tankRuleId = isExpense
+      ? selectedTransaction.allocatedIncomeRuleId
+      : selectedTransaction.recurringRuleId;
+    const tankInfo = resolveTankInfo(tankRuleId);
+    const section = sectionById.get(selectedTransaction.sectionId);
+    const rule =
+      selectedTransaction.recurringRuleId !== null
+        ? ruleById.get(selectedTransaction.recurringRuleId)
+        : undefined;
+    return {
+      id: selectedTransaction.id,
+      kind: selectedTransaction.kind,
+      amount: selectedTransaction.amount,
+      description: selectedTransaction.description,
+      occurredAt: selectedTransaction.occurredAt,
+      createdAt: selectedTransaction.createdAt,
+      sectionName: section?.name,
+      tankLabel: tankInfo.label,
+      tankColor: tankInfo.color,
+      rule: rule
+        ? {
+            label: rule.label,
+            frequency: rule.frequency,
+            customIntervalValue: rule.customIntervalValue,
+            customIntervalUnit: rule.customIntervalUnit,
+            isVariableAmount: rule.isVariableAmount,
+            nextDueDate: rule.nextDueDate,
+            archivedAt: rule.archivedAt,
+          }
+        : undefined,
+    };
+  }, [selectedTransaction, ruleById, sectionById, tankLabelByRuleId]);
+
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -185,26 +242,31 @@ export default function TransactionsScreen() {
                   : 'backgroundRecurringFixed'
                 : 'backgroundElement';
               return (
-                <ThemedView key={transaction.id} type={rowBackground} style={styles.row}>
-                  <View style={styles.rowMain}>
-                    <ThemedText type="smallBold">{section?.name ?? 'Sección'}</ThemedText>
-                    {transaction.description ? (
+                <Pressable
+                  key={transaction.id}
+                  onPress={() => setSelectedTransactionId(transaction.id)}
+                  style={({ pressed }) => pressed && styles.pressed}>
+                  <ThemedView type={rowBackground} style={styles.row}>
+                    <View style={styles.rowMain}>
+                      <ThemedText type="smallBold">{section?.name ?? 'Sección'}</ThemedText>
+                      {transaction.description ? (
+                        <ThemedText type="small" themeColor="textSecondary">
+                          {transaction.description}
+                        </ThemedText>
+                      ) : null}
                       <ThemedText type="small" themeColor="textSecondary">
-                        {transaction.description}
+                        {isExpense ? 'Sale de: ' : 'Se agrega a: '}
+                        {tankLabel ?? 'Libre'}
                       </ThemedText>
-                    ) : null}
-                    <ThemedText type="small" themeColor="textSecondary">
-                      {isExpense ? 'Sale de: ' : 'Se agrega a: '}
-                      {tankLabel ?? 'Libre'}
+                    </View>
+                    <ThemedText
+                      type="smallBold"
+                      style={{ color: isExpense ? '#E5484D' : '#30A46C' }}>
+                      {isExpense ? '-' : '+'}
+                      {formatCurrency(transaction.amount)}
                     </ThemedText>
-                  </View>
-                  <ThemedText
-                    type="smallBold"
-                    style={{ color: isExpense ? '#E5484D' : '#30A46C' }}>
-                    {isExpense ? '-' : '+'}
-                    {formatCurrency(transaction.amount)}
-                  </ThemedText>
-                </ThemedView>
+                  </ThemedView>
+                </Pressable>
               );
             })}
           </ThemedView>
@@ -220,6 +282,13 @@ export default function TransactionsScreen() {
           />
         </ScrollView>
       </SafeAreaView>
+
+      {selectedDetail && (
+        <TransactionDetailModal
+          transaction={selectedDetail}
+          onClose={() => setSelectedTransactionId(null)}
+        />
+      )}
     </ThemedView>
   );
 }

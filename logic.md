@@ -8,7 +8,7 @@ Este documento detalla la lógica de cálculo del tanque **Libre** y el flujo de
 
 El nivel actual del dinero libre disponible se calcula de la siguiente manera:
 
-$$\text{Nivel Libre} = (\text{Ingresos Libres [Históricos]} - \text{Gastos Libres [Históricos]}) + \text{Sobrante Ciclos Cerrados Activos} + \text{Sobrante Reglas Desactivadas/Archivadas}$$
+$$\text{Nivel Libre} = \max(0, (\text{Ingresos Libres [Históricos]} - \text{Gastos Libres [Históricos]}) + \text{Saldo Neto Ciclos Cerrados Activos} + \text{Déficit Ciclo Actual Activos} + \text{Saldo Neto Reglas Desactivadas/Archivadas} - \text{Reserva Tanques Especiales})$$
 
 ### Desglose:
 
@@ -16,15 +16,20 @@ $$\text{Nivel Libre} = (\text{Ingresos Libres [Históricos]} - \text{Gastos Libr
    - Transacciones digitadas manualmente que **no están asociadas a ninguna regla recurrente** (`recurringRuleId === null` para ingresos, y `allocatedIncomeRuleId === null` para gastos).
    - Se calculan sobre todo el historial de la aplicación, evitando pérdidas de saldo cuando el usuario cambia el rango del máximo a períodos muy cortos (ej. 1 día).
 
-2. **Suma de sobrantes de ciclos cerrados de reglas activas**:
-   - Para cada regla recurrente de ingreso activa, los fondos del período en curso (ej. del mes actual) se retienen dentro del tanque de esa regla y no van al Libre.
-   - Cuando el período finaliza y la regla se renueva (el ciclo se cierra), el sobrante ($\text{Ingresos Recibidos en el ciclo} - \text{Gastos Asignados a ese ciclo}$) se transfiere definitivamente al fondo **Libre**.
-   - Esto se acumula retroactivamente sobre todos los ciclos pasados completados de cada regla activa.
+2. **Saldo Neto de Ciclos Cerrados de Reglas Activas**:
+   - Para cada regla recurrente de ingreso activa (excluyendo tanques especiales), los fondos del período en curso (ej. del mes actual) se retienen dentro del tanque de esa regla y no van al Libre.
+   - Cuando el período finaliza y la regla se renueva (el ciclo se cierra), el remanente neto ($\text{Ingresos Recibidos en el ciclo} - \text{Gastos Asignados a ese ciclo}$) se transfiere definitivamente al fondo **Libre**.
+   - Estos sobrantes/déficits se acumulan de forma neta de manera retroactiva sobre todos los ciclos pasados completados. Si en un ciclo cerrado se gastó más dinero del recibido (déficit), este valor reduce directamente el saldo de Libre.
 
-3. **Sobrante de reglas desactivadas (archivadas)**:
-   - Dinero sobrante neto de reglas de ingresos que han sido desactivadas en el pasado.
+3. **Déficit del Ciclo en Curso de Reglas Activas**:
+   - Si en el ciclo actual de una regla activa la suma de los gastos reales asignados y los gastos planificados/reservados supera los ingresos recibidos hasta el momento, se genera un déficit temporal.
+   - Este déficit del ciclo actual (`Math.min(0, recibido - asignado - reservado)`) se resta directamente del saldo de Libre, ya que en la realidad ese dinero excedente ya se gastó o está comprometido de los fondos generales.
+
+4. **Saldo Neto de Reglas Desactivadas (Archivadas)**:
+   - Dinero remanente neto de reglas de ingresos que han sido desactivadas en el pasado.
    - $\text{Total ingresos históricos de la regla} - \text{Total gastos históricos asignados}$.
-   - Evita la desaparición de fondos ahorrados de fuentes de ingresos del pasado que fueron archivadas o eliminadas de la vista activa.
+   - Se calcula de forma neta (puede ser positivo o negativo) para evitar que desaparezcan tanto los ahorros acumulados como los déficits generados por fuentes de ingresos del pasado al ser archivadas.
+
 
 ---
 

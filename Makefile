@@ -35,7 +35,7 @@ help:
 	@echo "  screenshot       Toma una captura de pantalla del dispositivo y la guarda en screenshot/screenshot.png"
 	@echo "  wsl-usb          Muestra los comandos de PowerShell para conectar USB a WSL"
 	@echo "  wireless-pair    Empareja adb inalámbrico con los datos de .env (CODIGO_LAN/IP/PUERTO)"
-	@echo "  wireless-connect Conecta adb inalámbrico con PUERTO_DEPURACION (empareja primero solo si ACTIVE != TRUE en .env)"
+	@echo "  wireless-connect Conecta adb inalámbrico con PUERTO_DEPURACION (empareja automáticamente primero si la conexión directa falla)"
 	@echo "  wireless-tunnel  Conecta adb inalámbrico y abre en la tablet el túnel que ya esté corriendo (make start-tunnel en otra terminal, puerto TUNNEL_PORT=$(TUNNEL_PORT))"
 	@echo "  clean            Limpia la caché del empaquetador Metro y Expo"
 	@echo "  clean-tmp-cache  Borra la caché de Metro en /tmp (arregla 'EACCES' si quedó con dueño root, pide sudo)"

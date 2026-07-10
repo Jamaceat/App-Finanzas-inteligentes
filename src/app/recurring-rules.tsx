@@ -327,7 +327,7 @@ function RuleForm({
   );
   const [sectionId, setSectionId] = useState<number | undefined>(editing?.sectionId);
   const [startDate, setStartDate] = useState<Date>(() => {
-    const initial = editing?.nextDueDate ?? new Date();
+    const initial = editing?.nextDueDate ?? startOfToday();
     const today = startOfToday();
     return restrictPastStartDates && initial < today ? today : initial;
   });
@@ -417,7 +417,7 @@ function RuleForm({
       });
       setLabel('');
       setAmountDigits('');
-      setStartDate(new Date());
+      setStartDate(startOfToday());
     }
 
     // Si la fecha de inicio elegida ya venció, esta regla arranca con ciclos
@@ -575,6 +575,7 @@ function RuleForm({
           freeCashTank={freeCashTank}
           transactions={transactions}
           allRules={allRules}
+          cancelLabel="Continuar sin confirmar"
           onClose={() => {
             setPendingBackfill(null);
             onDone();
