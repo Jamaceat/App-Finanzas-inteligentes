@@ -148,6 +148,9 @@ export const appSettings = sqliteTable('app_settings', {
   allowPartialTankAssignment: integer('allow_partial_tank_assignment', { mode: 'boolean' })
     .notNull()
     .default(false),
+  calendarEditFocus: text('calendar_edit_focus', { enum: ['origin', 'current'] })
+    .notNull()
+    .default('origin'),
   updatedAt: integer('updated_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),

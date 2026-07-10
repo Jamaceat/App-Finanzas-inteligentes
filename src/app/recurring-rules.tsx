@@ -378,22 +378,35 @@ function RuleForm({
     return minDate;
   }, [editing, allRules, transactions]);
 
-  useEffect(() => {
-    if (originalStartDate) {
-      setStartDate(originalStartDate);
-    }
-  }, [originalStartDate]);
-
   const cycleWindow = useMemo(() => {
     if (!editing) return undefined;
     return getCycleWindow(editing);
   }, [editing]);
 
+  const calendarEditFocus = appSettingsRows?.[0]?.calendarEditFocus ?? 'origin';
+  const [lastInitializedRuleId, setLastInitializedRuleId] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (editing && lastInitializedRuleId !== editing.id) {
+      if (calendarEditFocus === 'origin' && originalStartDate) {
+        setStartDate(originalStartDate);
+        setLastInitializedRuleId(editing.id);
+      } else if (calendarEditFocus === 'current' && cycleWindow?.start) {
+        setStartDate(cycleWindow.start);
+        setLastInitializedRuleId(editing.id);
+      }
+    } else if (!editing && lastInitializedRuleId !== null) {
+      setLastInitializedRuleId(null);
+    }
+  }, [editing, originalStartDate, cycleWindow, calendarEditFocus, lastInitializedRuleId]);
+
+  const simulationStartDate = editing && cycleWindow?.start ? cycleWindow.start : startDate;
+
   // Memoizado: sin esto se re-simulan todas las ocurrencias (y se re-renderiza
   // el MiniCalendar con array nuevo) en cada tecleo del formulario.
   const upcomingDates = useMemo(
-    () => simulateOccurrences(startDate, frequency, customValueNumber, customUnit, simulationOccurrences),
-    [startDate, frequency, customValueNumber, customUnit, simulationOccurrences],
+    () => simulateOccurrences(simulationStartDate, frequency, customValueNumber, customUnit, simulationOccurrences),
+    [simulationStartDate, frequency, customValueNumber, customUnit, simulationOccurrences],
   );
 
   // Solo se usan si, tras guardar, la regla queda con ciclos vencidos por
@@ -729,6 +742,10 @@ function MiniCalendar({
   const [viewDate, setViewDate] = useState(new Date(value.getFullYear(), value.getMonth(), 1));
   const [containerWidth, setContainerWidth] = useState(0);
 
+  useEffect(() => {
+    setViewDate(new Date(value.getFullYear(), value.getMonth(), 1));
+  }, [value]);
+
   // Set de días resaltados: evita highlightDates.some(isSameDay) por cada una
   // de las 42 celdas de la grilla.
   const highlightDayKeys = useMemo(
@@ -755,25 +772,24 @@ function MiniCalendar({
 
   function handleGoToToday() {
     const today = startOfToday();
-    onChange(today);
     setViewDate(new Date(today.getFullYear(), today.getMonth(), 1));
   }
 
+  // Si el usuario quiere ver/enfocar ciclo origen, ciclo actual o fin de ciclo,
+  // solo cambiamos el mes visible (setViewDate) para que lo visualice,
+  // sin forzar una selección/cambio de fecha (onChange).
   function handleGoToOriginalStart() {
     if (!originalStartDate) return;
-    onChange(originalStartDate);
     setViewDate(new Date(originalStartDate.getFullYear(), originalStartDate.getMonth(), 1));
   }
 
   function handleGoToCycleStart() {
     if (!cycleStart) return;
-    onChange(cycleStart);
     setViewDate(new Date(cycleStart.getFullYear(), cycleStart.getMonth(), 1));
   }
 
   function handleGoToCycleEnd() {
     if (!cycleEnd) return;
-    onChange(cycleEnd);
     setViewDate(new Date(cycleEnd.getFullYear(), cycleEnd.getMonth(), 1));
   }
 

@@ -1,0 +1,1 @@
+ALTER TABLE `app_settings` ADD `calendar_edit_focus` text DEFAULT 'origin' NOT NULL;

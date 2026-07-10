@@ -14,6 +14,7 @@ export type AppSettings = {
   restrictPastStartDates: boolean;
   transactionsPageSize: number;
   allowPartialTankAssignment: boolean;
+  calendarEditFocus: 'origin' | 'current';
 };
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -24,6 +25,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   restrictPastStartDates: false,
   transactionsPageSize: 20,
   allowPartialTankAssignment: false,
+  calendarEditFocus: 'origin',
 };
 
 export function watchAppSettingsRow() {
@@ -144,6 +146,24 @@ export async function updateAllowPartialTankAssignment(enabled: boolean): Promis
   const [updated] = await db
     .update(appSettings)
     .set({ allowPartialTankAssignment: enabled, updatedAt: new Date() })
+    .where(eq(appSettings.id, row.id))
+    .returning();
+  return updated;
+}
+
+export async function updateCalendarEditFocus(focus: 'origin' | 'current'): Promise<AppSettings> {
+  const [row] = await watchAppSettingsRow();
+  if (!row) {
+    const [created] = await db
+      .insert(appSettings)
+      .values({ ...DEFAULT_SETTINGS, calendarEditFocus: focus })
+      .returning();
+    return created;
+  }
+
+  const [updated] = await db
+    .update(appSettings)
+    .set({ calendarEditFocus: focus, updatedAt: new Date() })
     .where(eq(appSettings.id, row.id))
     .returning();
   return updated;

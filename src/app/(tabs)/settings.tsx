@@ -20,6 +20,7 @@ import {
   updateRestrictPastStartDates,
   updateTransactionsPageSize,
   updateAllowPartialTankAssignment,
+  updateCalendarEditFocus,
   resetAllData,
   type TankMaxRenewalUnit,
 } from '@/db/queries/settings';
@@ -62,6 +63,7 @@ export default function SettingsScreen() {
               <VibrationForm enabled={row.vibrationEnabled} />
               <RestrictPastDatesForm enabled={row.restrictPastStartDates} />
               <AllowPartialTankAssignmentForm enabled={row.allowPartialTankAssignment} />
+              <CalendarEditFocusForm value={row.calendarEditFocus} />
               <ResetDataForm />
             </View>
           )}
@@ -249,6 +251,34 @@ function AllowPartialTankAssignmentForm({ enabled }: { enabled: boolean }) {
           </ThemedText>
         </View>
         <ThemedSwitch value={enabled} onValueChange={handleToggle} />
+      </View>
+    </ThemedView>
+  );
+}
+
+function CalendarEditFocusForm({ value }: { value: 'origin' | 'current' }) {
+  async function handleSelect(focus: 'origin' | 'current') {
+    await updateCalendarEditFocus(focus);
+  }
+
+  return (
+    <ThemedView type="backgroundElement" style={styles.form}>
+      <ThemedText type="smallBold">Calendario al editar</ThemedText>
+      <ThemedText type="small" themeColor="textSecondary">
+        Define si al editar una regla se muestra el calendario centrado en la fecha de inicio del ciclo origen o del ciclo actual.
+      </ThemedText>
+
+      <View style={styles.chipRow}>
+        <Chip
+          label="Inicio ciclo origen"
+          selected={value === 'origin'}
+          onPress={() => handleSelect('origin')}
+        />
+        <Chip
+          label="Inicio ciclo actual"
+          selected={value === 'current'}
+          onPress={() => handleSelect('current')}
+        />
       </View>
     </ThemedView>
   );

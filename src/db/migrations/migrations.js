@@ -1,7 +1,4 @@
 // This file is required for Expo/React Native SQLite migrations - https://orm.drizzle.team/quick-sqlite/expo
-// NOTA: los .sql se inlinean aquí vía babel-plugin-inline-import; Metro NO invalida su
-// caché cuando cambia solo un .sql. Si editás un .sql ya generado, corré `expo start -c`
-// (o cambiá este archivo) para que el bundle tome el SQL nuevo.
 
 import journal from './meta/_journal.json';
 import m0000 from './0000_hesitant_malcolm_colcord.sql';
@@ -18,6 +15,7 @@ import m0010 from './0010_certain_radioactive_man.sql';
 import m0011 from './0011_mature_quasimodo.sql';
 import m0012 from './0012_huge_ezekiel_stane.sql';
 import m0013 from './0013_gray_blue_blade.sql';
+import m0014 from './0014_futuristic_lady_vermin.sql';
 
   export default {
     journal,
@@ -35,7 +33,8 @@ m0009,
 m0010,
 m0011,
 m0012,
-m0013
+m0013,
+m0014
     }
   }
   
