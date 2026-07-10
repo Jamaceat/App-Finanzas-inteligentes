@@ -1,7 +1,10 @@
-.PHONY: help install start start-tunnel android web clean clean-tmp-cache reset dev-reset prebuild local-apk local-apk-rebuild local-apk-clean eas-login eas-config eas-apk eas-aab adb-reverse start-tablet open-tablet screenshot logs wsl-usb wireless-pair wireless-connect
+.PHONY: help install start start-tunnel android web clean clean-tmp-cache reset dev-reset prebuild local-apk local-apk-rebuild local-apk-clean eas-login eas-config eas-apk eas-aab adb-reverse start-tablet open-tablet screenshot logs wsl-usb wireless-pair wireless-connect wireless-tunnel
 
 # Puerto para depuración móvil (configurable vía: make <target> PORT=xxxx)
 PORT ?= 8082
+
+# Puerto del Metro que ya está corriendo con 'make start-tunnel' (por defecto Expo usa 8081)
+TUNNEL_PORT ?= 8081
 
 # Gestor de paquetes por defecto (npm)
 PACKAGE_MANAGER = npm
@@ -33,6 +36,7 @@ help:
 	@echo "  wsl-usb          Muestra los comandos de PowerShell para conectar USB a WSL"
 	@echo "  wireless-pair    Empareja adb inalámbrico con los datos de .env (CODIGO_LAN/IP/PUERTO)"
 	@echo "  wireless-connect Conecta adb inalámbrico con PUERTO_DEPURACION (empareja primero solo si ACTIVE != TRUE en .env)"
+	@echo "  wireless-tunnel  Conecta adb inalámbrico y abre en la tablet el túnel que ya esté corriendo (make start-tunnel en otra terminal, puerto TUNNEL_PORT=$(TUNNEL_PORT))"
 	@echo "  clean            Limpia la caché del empaquetador Metro y Expo"
 	@echo "  clean-tmp-cache  Borra la caché de Metro en /tmp (arregla 'EACCES' si quedó con dueño root, pide sudo)"
 	@echo "  reset            Ejecuta el script de reinicio del proyecto"
@@ -168,6 +172,12 @@ wireless-pair:
 wireless-connect:
 	@chmod +x scripts/adb-wireless.sh
 	@scripts/adb-wireless.sh connect
+
+wireless-tunnel: wireless-connect
+	@echo "$(BLUE)Abriendo la app en la tablet usando el Metro que ya está corriendo en el puerto $(TUNNEL_PORT)...$(RESET)"
+	@curl -sf -X POST "http://localhost:$(TUNNEL_PORT)/_expo/open?platform=android" >/dev/null && \
+		echo "$(GREEN)App abierta en la tablet.$(RESET)" || \
+		(echo "$(BLUE)No se pudo abrir.$(RESET) ¿Está corriendo 'make start-tunnel' en otra terminal? Si usa otro puerto: make wireless-tunnel TUNNEL_PORT=<puerto>" >&2; exit 1)
 
 wsl-usb:
 	@echo "================================================================="

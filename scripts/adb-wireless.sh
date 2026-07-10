@@ -49,7 +49,7 @@ do_pair() {
 
 do_connect() {
   echo "Conectando a $DIRECCION_IP_DISPOSITIVO:$PUERTO_DEPURACION..."
-  if OUTPUT="$(adb connect "$DIRECCION_IP_DISPOSITIVO:$PUERTO_DEPURACION" 2>&1)" && echo "$OUTPUT" | grep -qi "^connected to"; then
+  if OUTPUT="$(adb connect "$DIRECCION_IP_DISPOSITIVO:$PUERTO_DEPURACION" 2>&1)" && echo "$OUTPUT" | grep -qi "connected to"; then
     echo "$OUTPUT"
     set_var ACTIVE TRUE
     echo "Conectado con éxito."
