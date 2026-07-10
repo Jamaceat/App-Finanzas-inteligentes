@@ -9,6 +9,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { confirmRecurringOccurrences } from '@/db/queries/transactions';
 import { createSpecialTank, updateSpecialTank } from '@/db/queries/recurring-rules';
 import {
+  getCycleWindow,
   type FreeCashTank,
   type IncomeTank,
   type PendingConfirmation,
@@ -42,9 +43,25 @@ function isSameCalendarDay(a: Date, b: Date): boolean {
 function findRememberedTankId(
   ruleId: number,
   transactions: { recurringRuleId: number | null; allocatedIncomeRuleId: number | null; occurredAt: Date }[],
+  allRules: { id: number; previousRuleId: number | null }[],
 ): number | null {
+  const lineageIds = new Set<number>();
+  let currentId: number | null = ruleId;
+  const rulesById = new Map(allRules.map((r) => [r.id, r]));
+  const visited = new Set<number>();
+  while (currentId !== null && !visited.has(currentId)) {
+    visited.add(currentId);
+    lineageIds.add(currentId);
+    currentId = rulesById.get(currentId)?.previousRuleId ?? null;
+  }
+
   const matches = transactions
-    .filter((t) => t.recurringRuleId === ruleId && t.allocatedIncomeRuleId !== null)
+    .filter(
+      (t) =>
+        t.recurringRuleId !== null &&
+        lineageIds.has(t.recurringRuleId) &&
+        t.allocatedIncomeRuleId !== null,
+    )
     .sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime());
   return matches[0]?.allocatedIncomeRuleId ?? null;
 }
@@ -61,6 +78,7 @@ export function ConfirmationModal({
   specialTanks,
   freeCashTank,
   transactions,
+  allRules,
   onClose,
 }: {
   confirmation: PendingConfirmation;
@@ -68,6 +86,7 @@ export function ConfirmationModal({
   specialTanks: SpecialTank[];
   freeCashTank: FreeCashTank;
   transactions: { recurringRuleId: number | null; allocatedIncomeRuleId: number | null; occurredAt: Date }[];
+  allRules: { id: number; previousRuleId: number | null; nextDueDate: Date; frequency: any; customIntervalValue?: number | null; customIntervalUnit?: any }[];
   onClose: () => void;
 }) {
   const theme = useTheme();
@@ -80,11 +99,11 @@ export function ConfirmationModal({
   );
   const rememberedTankId = useMemo(() => {
     if (!isExpense) return null;
-    const rawId = confirmation.plannedTankRuleId ?? findRememberedTankId(confirmation.ruleId, transactions);
+    const rawId = confirmation.plannedTankRuleId ?? findRememberedTankId(confirmation.ruleId, transactions, allRules);
     const isActive =
       incomeTanks.some((tank) => tank.ruleId === rawId) || ownSpecialTank?.ruleId === rawId;
     return isActive ? rawId : null;
-  }, [isExpense, confirmation.plannedTankRuleId, confirmation.ruleId, transactions, incomeTanks, ownSpecialTank]);
+  }, [isExpense, confirmation.plannedTankRuleId, confirmation.ruleId, transactions, allRules, incomeTanks, ownSpecialTank]);
   const needsTankChoice = isExpense && rememberedTankId === null;
 
   const [rows, setRows] = useState<OccurrenceRow[]>(() => {
@@ -151,7 +170,24 @@ export function ConfirmationModal({
     );
   }, [activeTankId, incomeTanks, ownSpecialTank, specialTankAvailable, confirmation.sectionId]);
 
-  const hasEnoughFunds = !isExpense || selectedTank === null || selectedTank.level >= totalAmount;
+  const tankRule = useMemo(() => {
+    if (selectedTankId === null || selectedTankId === SPECIAL_TANK_SENTINEL_ID) return null;
+    return allRules.find((r) => r.id === selectedTankId) ?? null;
+  }, [selectedTankId, allRules]);
+
+  const tankCycleWindow = useMemo(() => {
+    if (!tankRule) return null;
+    return getCycleWindow(tankRule);
+  }, [tankRule]);
+
+  const currentPeriodTotalAmount = useMemo(() => {
+    if (!tankCycleWindow) return totalAmount;
+    return checkedRows
+      .filter((row) => row.date >= tankCycleWindow.start)
+      .reduce((sum, row) => sum + Number(row.amountDigits || '0') / 100, 0);
+  }, [checkedRows, tankCycleWindow, totalAmount]);
+
+  const hasEnoughFunds = !isExpense || selectedTank === null || selectedTank.level >= currentPeriodTotalAmount;
   const isSpecialTankSelected =
     selectedTankId === SPECIAL_TANK_SENTINEL_ID || (ownSpecialTank !== null && selectedTankId === ownSpecialTank.ruleId);
 

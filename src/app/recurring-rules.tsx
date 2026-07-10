@@ -428,7 +428,7 @@ function RuleForm({
     const now = new Date();
     if (created.nextDueDate < now) {
       const [confirmation] = computePendingConfirmations([created], created.kind, {
-        allRules,
+        allRules: [...allRules, { id: created.id, previousRuleId: created.previousRuleId }],
         transactions,
       });
       if (confirmation) {
@@ -574,6 +574,7 @@ function RuleForm({
           specialTanks={specialTanks}
           freeCashTank={freeCashTank}
           transactions={transactions}
+          allRules={allRules}
           onClose={() => {
             setPendingBackfill(null);
             onDone();

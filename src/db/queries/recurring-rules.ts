@@ -186,12 +186,14 @@ export function archiveRecurringRule(id: number, executor: DbExecutor = db) {
     .returning();
 }
 
-// Editar una regla = archivar la anterior (preserva historial de ciclos) + crear la nueva
-// versión. Un solo commit: una sola notificación de cambio para los useLiveQuery montados.
 export async function replaceRecurringRule(archiveId: number, input: CreateRecurringRuleInput) {
   return db.transaction((tx) => {
-    archiveRecurringRule(archiveId, tx).all();
-    const [created] = createRecurringRule({ ...input, previousRuleId: archiveId }, tx).all();
+    const [archived] = archiveRecurringRule(archiveId, tx).all();
+    const plannedTankRuleId = archived?.plannedTankRuleId ?? null;
+    const [created] = createRecurringRule(
+      { ...input, previousRuleId: archiveId, plannedTankRuleId },
+      tx,
+    ).all();
     return created;
   });
 }

@@ -84,8 +84,15 @@ export function stepBack(
   return prev;
 }
 
-export function getCycleWindow(rule: IntervalRule & { nextDueDate: Date }) {
-  const end = rule.nextDueDate;
+export function getCycleWindow(rule: IntervalRule & { nextDueDate: Date }, referenceDate: Date = new Date()) {
+  let end = rule.nextDueDate;
+  while (end < referenceDate) {
+    const next = advanceDate(end, rule.frequency, rule.customIntervalValue, rule.customIntervalUnit);
+    if (next.getTime() <= end.getTime()) {
+      break;
+    }
+    end = next;
+  }
   const start = stepBack(end, rule.frequency, rule.customIntervalValue, rule.customIntervalUnit);
   return { start, end };
 }
@@ -306,7 +313,7 @@ export function computeIncomeTanks(
   return rules
     .filter((rule) => rule.kind === 'income' && !rule.archivedAt && rule.tankKind !== 'special')
     .map((rule) => {
-      const window = getCycleWindow(rule);
+      const window = getCycleWindow(rule, now);
       const received = sumInWindow(index.incomeByRuleId.get(rule.id) ?? EMPTY_TRANSACTIONS, window);
       const allocated = sumInWindow(
         index.expenseByAllocatedRuleId.get(rule.id) ?? EMPTY_TRANSACTIONS,
@@ -334,6 +341,7 @@ export function computeFreeCashTank(
   windowStart: Date,
   allRules?: RuleLineageRow[],
 ): FreeCashTank {
+  const now = new Date();
   const activeRuleIds = new Set(rules.map((r) => r.id));
   const effectiveTransactions = allRules
     ? remapTransactionsToLineageHead(transactions, buildLineageHeadMap(allRules, activeRuleIds))
@@ -357,19 +365,20 @@ export function computeFreeCashTank(
     .reduce((total, rule) => {
       const ruleIncomes = index.incomeByRuleId.get(rule.id) ?? EMPTY_TRANSACTIONS;
       const ruleAllocated = index.expenseByAllocatedRuleId.get(rule.id) ?? EMPTY_TRANSACTIONS;
-      const { start: currentStart } = getCycleWindow(rule);
+      const { start: currentStart } = getCycleWindow(rule, now);
       let cycleEnd = currentStart;
       let ruleLeftover = 0;
-      let iterations = 0;
 
-      while (cycleEnd > oldestTxDate && iterations < 500) {
-        iterations++;
+      while (cycleEnd > oldestTxDate) {
         const cycleStart = stepBack(
           cycleEnd,
           rule.frequency,
           rule.customIntervalValue,
           rule.customIntervalUnit,
         );
+        if (cycleStart.getTime() >= cycleEnd.getTime()) {
+          break;
+        }
         const window = { start: cycleStart, end: cycleEnd };
         const received = sumInWindow(ruleIncomes, window);
         const allocated = sumInWindow(ruleAllocated, window);
@@ -394,7 +403,6 @@ export function computeFreeCashTank(
   // computeSpecialTanks): se resta la capacidad completa, no el nivel restante, porque
   // esa plata queda reservada para su gasto dueño desde el momento en que se crea el
   // tanque, aunque todavía no se haya gastado.
-  const now = new Date();
   const specialTanksReserved = rules
     .filter(
       (rule) =>
@@ -610,13 +618,15 @@ export function computePendingConfirmations(
           : null;
       const occurrences: Date[] = [];
       let current = rule.nextDueDate;
-      let iterations = 0;
-      while (current < now && iterations < 500) {
+      while (current < now) {
         if (!excludedKeys?.has(dayKey(current))) {
           occurrences.push(current);
         }
-        current = advanceDate(current, rule.frequency, rule.customIntervalValue, rule.customIntervalUnit);
-        iterations++;
+        const next = advanceDate(current, rule.frequency, rule.customIntervalValue, rule.customIntervalUnit);
+        if (next.getTime() <= current.getTime()) {
+          break;
+        }
+        current = next;
       }
       return {
         ruleId: rule.id,

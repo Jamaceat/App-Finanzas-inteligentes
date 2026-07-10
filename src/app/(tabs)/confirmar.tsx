@@ -121,6 +121,7 @@ export default function ConfirmarScreen() {
           specialTanks={specialTanks}
           freeCashTank={freeCashTank}
           transactions={transactions}
+          allRules={allRules}
           onClose={() => setActiveConfirmation(null)}
         />
       )}
