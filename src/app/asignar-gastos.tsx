@@ -510,7 +510,7 @@ export default function AsignarGastosScreen() {
             Asignar gastos
           </ThemedText>
           <ThemedText type="small" themeColor="textSecondary" style={styles.subtitle}>
-            Tocá un gasto y arrastralo hasta el tanque del que sale.
+            Toca un gasto y arrástralo hasta el tanque del que sale.
           </ThemedText>
 
           {points.length > 0 && (
@@ -541,7 +541,7 @@ export default function AsignarGastosScreen() {
           )}
           {points.length > 0 && incomeTanks.length === 0 && (
             <ThemedText themeColor="textSecondary" style={styles.emptyText}>
-              Creá una regla de ingreso recurrente en Secciones para poder asignar estos gastos.
+              Crea una regla de ingreso recurrente en Secciones para poder asignar estos gastos.
             </ThemedText>
           )}
         </SafeAreaView>

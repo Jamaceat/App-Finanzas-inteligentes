@@ -16,6 +16,7 @@ import m0011 from './0011_mature_quasimodo.sql';
 import m0012 from './0012_huge_ezekiel_stane.sql';
 import m0013 from './0013_gray_blue_blade.sql';
 import m0014 from './0014_futuristic_lady_vermin.sql';
+import m0015 from './0015_ambitious_changeling.sql';
 
   export default {
     journal,
@@ -34,7 +35,8 @@ m0010,
 m0011,
 m0012,
 m0013,
-m0014
+m0014,
+m0015
     }
   }
   

@@ -104,6 +104,11 @@ export const transactions = sqliteTable(
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),
+    // Papelera: borrar una transacción solo la oculta (no toca recurringRuleId ni
+    // dispara ningún cambio en la regla recurrente que la generó, en particular nunca
+    // nextDueDate). Como los saldos de tanque se recalculan en vivo sumando filas de
+    // esta tabla, ocultar/mostrar una fila alcanza para deshacer/rehacer su efecto.
+    deletedAt: integer('deleted_at', { mode: 'timestamp' }),
   },
   (table) => [
     index('transactions_occurred_at_idx').on(table.occurredAt),
@@ -113,6 +118,7 @@ export const transactions = sqliteTable(
       table.kind,
       table.allocatedIncomeRuleId,
     ),
+    index('transactions_deleted_at_idx').on(table.deletedAt),
   ],
 );
 

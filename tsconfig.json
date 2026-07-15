@@ -17,5 +17,12 @@
     "**/*.tsx",
     ".expo/types/**/*.ts",
     "expo-env.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    ".expo",
+    "babel.config.js",
+    "metro.config.js"
   ]
 }

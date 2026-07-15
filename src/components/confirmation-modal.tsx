@@ -123,6 +123,13 @@ export function ConfirmationModal({
   });
   const [selectedTankId, setSelectedTankId] = useState<number | null>(rememberedTankId);
   const [submitting, setSubmitting] = useState(false);
+  // Con todo destildado, "Descartar los no marcados" queda habilitado igual (ver
+  // canDiscard más abajo) y descarta TODOS los ciclos sin registrar nada — fácil de
+  // tocar sin querer pensando que es la forma de "continuar". Se pide una confirmación
+  // extra solo en ese caso puntual (0 filas tildadas); con al menos una tildada, el
+  // link se usa para su propósito normal (confirmar esas + saltar el resto) y no hace
+  // falta interrumpir.
+  const [confirmDiscardAll, setConfirmDiscardAll] = useState(false);
 
   function toggleRow(index: number) {
     setRows((prev) => prev.map((row, i) => (i === index ? { ...row, checked: !row.checked } : row)));
@@ -354,7 +361,7 @@ export function ConfirmationModal({
             {needsTankChoice && (
               <View style={styles.tankSection}>
                 <ThemedText type="small" themeColor="textSecondary">
-                  Elegí de qué tanque sale este gasto:
+                  Elige de qué tanque sale este gasto:
                 </ThemedText>
                 <View style={styles.chipRow}>
                   {incomeTanks.map((tank) => (
@@ -435,12 +442,18 @@ export function ConfirmationModal({
             {firstUnconfirmedRow && (
               <View style={styles.discardBox}>
                 <ThemedText type="small" themeColor="textSecondary">
-                  ¿Los ciclos sin tildar en realidad no pasaron y no van a pasar (p.ej. días de
-                  prueba)? Descartalos para que dejen de aparecer como pendientes; el
+                  ¿Los ciclos sin marcar en realidad no ocurrieron y no van a ocurrir (p.ej. días de
+                  prueba)? Descártalos para que dejen de aparecer como pendientes; el
                   vencimiento pasa directo al {formatDate(confirmation.nextDueAfter)}.
                 </ThemedText>
                 <Pressable
-                  onPress={handleDiscardRest}
+                  onPress={() => {
+                    if (checkedRows.length === 0) {
+                      setConfirmDiscardAll(true);
+                    } else {
+                      handleDiscardRest();
+                    }
+                  }}
                   disabled={!canDiscard}
                   style={({ pressed }) => pressed && styles.pressed}>
                   <ThemedText
@@ -471,6 +484,40 @@ export function ConfirmationModal({
             </View>
           </ScrollView>
         </ThemedView>
+
+        {confirmDiscardAll && (
+          <View style={styles.nestedConfirmOverlay}>
+            <ThemedView type="backgroundElement" style={styles.nestedConfirmCard}>
+              <ThemedText type="smallBold">Descartar todos los ciclos</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">
+                No marcaste ningún ciclo: esto va a saltar el vencimiento de {confirmation.label} directo
+                al {formatDate(confirmation.nextDueAfter)} sin registrar ningún {kindLabel === 'gastos' ? 'gasto' : 'ingreso'}.
+                Si te arrepientes, puedes volver a poner una fecha de inicio anterior para que reaparezcan.
+              </ThemedText>
+              <View style={styles.confirmActions}>
+                <Pressable
+                  onPress={() => setConfirmDiscardAll(false)}
+                  style={({ pressed }) => [styles.confirmActionButtonWrapper, pressed && styles.pressed]}>
+                  <View style={[styles.confirmActionButton, { backgroundColor: theme.background }]}>
+                    <ThemedText type="small">Cancelar</ThemedText>
+                  </View>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    setConfirmDiscardAll(false);
+                    handleDiscardRest();
+                  }}
+                  style={({ pressed }) => [styles.confirmActionButtonWrapper, pressed && styles.pressed]}>
+                  <View style={[styles.confirmActionButton, { backgroundColor: theme.background }]}>
+                    <ThemedText type="smallBold" style={styles.discardConfirmText}>
+                      Descartar todo
+                    </ThemedText>
+                  </View>
+                </Pressable>
+              </View>
+            </ThemedView>
+          </View>
+        )}
       </View>
     </Modal>
   );
@@ -579,5 +626,40 @@ const styles = StyleSheet.create({
     color: '#E5484D',
     marginTop: Spacing.two,
     fontWeight: '600',
+  },
+  nestedConfirmOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: Spacing.four,
+    borderRadius: Spacing.four,
+  },
+  nestedConfirmCard: {
+    width: '100%',
+    maxWidth: 420,
+    borderRadius: Spacing.four,
+    padding: Spacing.four,
+    gap: Spacing.two,
+  },
+  confirmActions: {
+    flexDirection: 'row',
+    gap: Spacing.two,
+    marginTop: Spacing.two,
+  },
+  confirmActionButtonWrapper: {
+    flex: 1,
+  },
+  confirmActionButton: {
+    alignItems: 'center',
+    paddingVertical: Spacing.two,
+    borderRadius: Spacing.three,
+  },
+  discardConfirmText: {
+    color: '#E5484D',
   },
 });

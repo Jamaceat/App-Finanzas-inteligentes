@@ -1,6 +1,6 @@
 import { SymbolView, type AndroidSymbol, type SFSymbol } from 'expo-symbols';
 import { useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -86,9 +86,11 @@ export type TransactionDetailData = {
 export function TransactionDetailModal({
   transaction,
   onClose,
+  onDelete,
 }: {
   transaction: TransactionDetailData;
   onClose: () => void;
+  onDelete: () => void;
 }) {
   const [openHint, setOpenHint] = useState<string | null>(null);
   const isExpense = transaction.kind === 'expense';
@@ -97,6 +99,17 @@ export function TransactionDetailModal({
   const cycleStart = rule
     ? stepBack(cycleEnd, rule.frequency, rule.customIntervalValue, rule.customIntervalUnit)
     : null;
+
+  function handleDeletePress() {
+    Alert.alert(
+      'Eliminar transacción',
+      'Se va a mover a la papelera y el tanque se actualiza al instante. Puedes restaurarla después. El calendario de la regla recurrente no se modifica.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Eliminar', style: 'destructive', onPress: onDelete },
+      ],
+    );
+  }
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
@@ -178,6 +191,14 @@ export function TransactionDetailModal({
                 )}
               </>
             )}
+
+            <Pressable onPress={handleDeletePress} style={({ pressed }) => pressed && styles.pressed}>
+              <View style={styles.deleteButton}>
+                <ThemedText type="smallBold" style={styles.deleteButtonText}>
+                  Eliminar
+                </ThemedText>
+              </View>
+            </Pressable>
 
             <Pressable onPress={onClose} style={({ pressed }) => pressed && styles.pressed}>
               <ThemedView type="background" style={styles.closeButton}>
@@ -360,5 +381,16 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.two,
     borderRadius: Spacing.three,
     marginTop: Spacing.two,
+  },
+  deleteButton: {
+    alignItems: 'center',
+    paddingVertical: Spacing.two,
+    borderRadius: Spacing.three,
+    marginTop: Spacing.two,
+    borderWidth: 1,
+    borderColor: '#E5484D',
+  },
+  deleteButtonText: {
+    color: '#E5484D',
   },
 });

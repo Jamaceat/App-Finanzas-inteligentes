@@ -352,7 +352,7 @@ export default function HomeScreen() {
               )}
               {incomeTanks.length === 0 && pendingExpenses.length > 0 && (
                 <ThemedText themeColor="textSecondary" type="small">
-                  Creá una regla de ingreso recurrente en Secciones para poder asignarles pagos.
+                  Crea una regla de ingreso recurrente en Secciones para poder asignarles pagos.
                 </ThemedText>
               )}
               <View style={styles.pendingList}>

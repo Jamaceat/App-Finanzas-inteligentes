@@ -389,14 +389,23 @@ function RuleForm({
   useEffect(() => {
     if (editing && lastInitializedRuleId !== editing.id) {
       if (calendarEditFocus === 'origin' && originalStartDate) {
-        setStartDate(originalStartDate);
-        setLastInitializedRuleId(editing.id);
+        const id = setTimeout(() => {
+          setStartDate(originalStartDate);
+          setLastInitializedRuleId(editing.id);
+        }, 0);
+        return () => clearTimeout(id);
       } else if (calendarEditFocus === 'current' && cycleWindow?.start) {
-        setStartDate(cycleWindow.start);
-        setLastInitializedRuleId(editing.id);
+        const id = setTimeout(() => {
+          setStartDate(cycleWindow.start);
+          setLastInitializedRuleId(editing.id);
+        }, 0);
+        return () => clearTimeout(id);
       }
     } else if (!editing && lastInitializedRuleId !== null) {
-      setLastInitializedRuleId(null);
+      const id = setTimeout(() => {
+        setLastInitializedRuleId(null);
+      }, 0);
+      return () => clearTimeout(id);
     }
   }, [editing, originalStartDate, cycleWindow, calendarEditFocus, lastInitializedRuleId]);
 
@@ -742,7 +751,10 @@ function MiniCalendar({
   const [containerWidth, setContainerWidth] = useState(0);
 
   useEffect(() => {
-    setViewDate(new Date(value.getFullYear(), value.getMonth(), 1));
+    const id = setTimeout(() => {
+      setViewDate(new Date(value.getFullYear(), value.getMonth(), 1));
+    }, 0);
+    return () => clearTimeout(id);
   }, [value]);
 
   // Set de días resaltados: evita highlightDates.some(isSameDay) por cada una
@@ -883,103 +895,132 @@ function MiniCalendar({
       </View>
 
       <View style={styles.calendarGrid}>
-        {cells.map((date, index) => {
-          if (!date) {
-            return <View key={index} style={[styles.calendarCell, cellStyle]} />;
-          }
+        {Array.from({ length: cells.length / 7 }, (_, rowIndex) => {
+          const rowCells = cells.slice(rowIndex * 7, rowIndex * 7 + 7);
 
-          const isSelected = isSameDay(date, value);
-          const isHighlighted = !isSelected && highlightDayKeys.has(dayKey(date));
-          const isDisabled = minDate != null && date < minDate && !isSameDay(date, minDate);
-          const isCycleStart = cycleStart != null && isSameDay(date, cycleStart);
-          const isCycleEnd = cycleEnd != null && isSameDay(date, cycleEnd);
-          const isCycleBoundary = isCycleStart || isCycleEnd;
-          const isToday = isSameDay(date, new Date());
+          // Barra de rango única por fila: evita la costura vertical apenas
+          // perceptible que aparecía al dibujar dos rectángulos independientes
+          // (uno por celda) que se tocaban justo en el borde entre el día de
+          // inicio y el siguiente.
+          let barLeftFraction: number | null = null;
+          let barWidthFraction = 0;
+          rowCells.forEach((date, col) => {
+            if (!date || cycleStart == null || cycleEnd == null) return;
+            if (date < cycleStart || date > cycleEnd) return;
 
-          const isInsideCycle =
-            cycleStart != null &&
-            cycleEnd != null &&
-            date >= cycleStart &&
-            date <= cycleEnd;
+            const isStart = isSameDay(date, cycleStart);
+            const isEnd = isSameDay(date, cycleEnd);
+            const cellLeft = col / 7;
+            const cellRight = (col + 1) / 7;
+            const left = isStart ? cellLeft + 1 / 14 : cellLeft;
+            const right = isEnd ? cellRight - 1 / 14 : cellRight;
 
-          let leftValue: any = 0;
-          let rightValue: any = 0;
-          let showBar = isInsideCycle;
-
-          if (isCycleStart && isCycleEnd) {
-            showBar = false;
-          } else if (isCycleStart) {
-            leftValue = '50%';
-            rightValue = 0;
-          } else if (isCycleEnd) {
-            leftValue = 0;
-            rightValue = '50%';
-          }
+            if (barLeftFraction == null) barLeftFraction = left;
+            barWidthFraction = right - barLeftFraction;
+          });
 
           return (
-            <Pressable
-              key={index}
-              disabled={isDisabled}
-              onPress={() => onChange(date)}
-              style={({ pressed }) => [styles.calendarCell, cellStyle, pressed && styles.pressed]}
-            >
-              {showBar && (
+            <View key={rowIndex} style={styles.calendarWeekGridRow}>
+              {barLeftFraction != null && barWidthFraction > 0 && (
                 <View
                   style={{
                     position: 'absolute',
                     top: '10%',
                     bottom: '10%',
-                    left: leftValue,
-                    right: rightValue,
+                    left: `${barLeftFraction * 100}%`,
+                    width: `${barWidthFraction * 100}%`,
                     backgroundColor: 'rgba(0, 145, 255, 0.18)',
                   }}
                 />
               )}
-              <View
-                style={[
-                  styles.calendarDay,
-                  dayStyle,
-                  {
-                    backgroundColor: isCycleBoundary && !isSelected
-                      ? theme.backgroundRecurringFixed
-                      : isSelected
-                        ? theme.backgroundSelected
-                        : 'transparent',
-                    borderColor: isCycleBoundary
-                      ? ORIGIN_COLOR
-                      : isHighlighted
-                        ? highlightColor
-                        : 'transparent',
-                    borderWidth: isCycleBoundary ? 2.5 : 1.5,
-                    opacity: isDisabled ? 0.3 : 1,
-                  },
-                ]}
-              >
-                <ThemedText
-                  type="small"
-                  style={[
-                    isCycleBoundary && !isSelected ? { fontWeight: 'bold' } : undefined,
-                    isToday && !isSelected && !isCycleBoundary ? { fontWeight: 'bold' } : undefined,
-                  ]}
-                >
-                  {date.getDate()}
-                </ThemedText>
-                {isToday && (
-                  <View
-                    style={{
-                      position: 'absolute',
-                      bottom: 4,
-                      width: 4,
-                      height: 4,
-                      borderRadius: 2,
-                      backgroundColor: isSelected
-                        ? theme.text
-                        : ORIGIN_COLOR,
-                    }}
-                  />
-                )}
-              </View>
-            </Pressable>
+              {rowCells.map((date, col) => {
+                const index = rowIndex * 7 + col;
+
+                if (!date) {
+                  return <View key={index} style={[styles.calendarCell, cellStyle]} />;
+                }
+
+                const isSelected = isSameDay(date, value);
+                const isHighlighted = !isSelected && highlightDayKeys.has(dayKey(date));
+                const isDisabled = minDate != null && date < minDate && !isSameDay(date, minDate);
+                const isCycleStart = cycleStart != null && isSameDay(date, cycleStart);
+                const isCycleEnd = cycleEnd != null && isSameDay(date, cycleEnd);
+                const isCycleBoundary = isCycleStart || isCycleEnd;
+                const isToday = isSameDay(date, new Date());
+
+                return (
+                  <Pressable
+                    key={index}
+                    disabled={isDisabled}
+                    onPress={() => onChange(date)}
+                    style={[styles.calendarCell, cellStyle]}
+                  >
+                    {({ pressed }) => (
+                    <View
+                      style={[
+                        styles.calendarDay,
+                        dayStyle,
+                        {
+                          backgroundColor: isCycleBoundary && !isSelected
+                            ? theme.backgroundRecurringFixed
+                            : isSelected
+                              ? theme.backgroundSelected
+                              : 'transparent',
+                          borderColor: isCycleBoundary
+                            ? ORIGIN_COLOR
+                            : isHighlighted
+                              ? highlightColor
+                              : 'transparent',
+                          borderWidth: isCycleBoundary ? 2.5 : 1.5,
+                          opacity: isDisabled ? 0.3 : 1,
+                        },
+                      ]}
+                    >
+                      <ThemedText
+                        type="small"
+                        style={[
+                          isCycleBoundary && !isSelected ? { fontWeight: 'bold' } : undefined,
+                          isToday && !isSelected && !isCycleBoundary ? { fontWeight: 'bold' } : undefined,
+                        ]}
+                      >
+                        {date.getDate()}
+                      </ThemedText>
+                      {isToday && (
+                        <View
+                          style={{
+                            position: 'absolute',
+                            bottom: 4,
+                            width: 4,
+                            height: 4,
+                            borderRadius: 2,
+                            backgroundColor: isSelected
+                              ? theme.text
+                              : ORIGIN_COLOR,
+                          }}
+                        />
+                      )}
+                      {pressed && (
+                        // Scrim opaco encima del círculo (no opacity en todo el
+                        // árbol) para que la barra de rango de la fila de atrás
+                        // nunca se filtre de forma asimétrica al presionar.
+                        <View
+                          pointerEvents="none"
+                          style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            backgroundColor: 'rgba(0, 0, 0, 0.12)',
+                          }}
+                        />
+                      )}
+                    </View>
+                    )}
+                  </Pressable>
+                );
+              })}
+            </View>
           );
         })}
       </View>
@@ -1155,8 +1196,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
   },
   calendarGrid: {
+    flexDirection: 'column',
+  },
+  calendarWeekGridRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    position: 'relative',
   },
   calendarCell: {
     width: '14.2857%',

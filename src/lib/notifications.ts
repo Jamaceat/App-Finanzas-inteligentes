@@ -87,7 +87,7 @@ export async function syncRuleReminder(rule: ReminderRule): Promise<void> {
     return;
   }
 
-  const verb = rule.kind === 'income' ? 'Registrá el ingreso' : 'Registrá el gasto';
+  const verb = rule.kind === 'income' ? 'Registra el ingreso' : 'Registra el gasto';
   const amountHint = rule.isVariableAmount
     ? 'Monto variable'
     : rule.estimatedAmount != null

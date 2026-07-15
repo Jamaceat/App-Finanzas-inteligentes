@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -19,6 +19,7 @@ import {
   countTransactions,
   createTransaction,
   listTransactions,
+  softDeleteTransaction,
   type TransactionKind,
 } from '@/db/queries/transactions';
 import { getOrCreateDefaultSection } from '@/db/queries/sections';
@@ -54,6 +55,7 @@ function formatCurrency(amount: number): string {
 const TRANSACTIONS_PAGE_SIZE = 20;
 
 export default function TransactionsScreen() {
+  const router = useRouter();
   const { kind: initialKind } = useLocalSearchParams<{ kind?: TransactionKind }>();
   const [sectionFilter, setSectionFilter] = useState<number | undefined>(undefined);
   const [searchText, setSearchText] = useState('');
@@ -189,6 +191,14 @@ export default function TransactionsScreen() {
     };
   }, [selectedTransaction, ruleById, sectionById, tankLabelByRuleId]);
 
+  const theme = useTheme();
+
+  async function handleDeleteSelected() {
+    if (selectedTransactionId === null) return;
+    await softDeleteTransaction(selectedTransactionId);
+    setSelectedTransactionId(null);
+  }
+
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -197,9 +207,17 @@ export default function TransactionsScreen() {
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
-          <ThemedText type="title" style={styles.title}>
-            Transacciones
-          </ThemedText>
+          <View style={styles.titleRow}>
+            <ThemedText type="title" style={styles.title}>
+              Transacciones
+            </ThemedText>
+            <Pressable
+              onPress={() => router.push('/trash')}
+              hitSlop={8}
+              style={({ pressed }) => pressed && styles.pressed}>
+              <SymbolView name={symbol('trash', 'delete')} tintColor={theme.textSecondary} size={22} />
+            </Pressable>
+          </View>
 
           <QuickAddForm sections={sections} tanks={tanks} initialKind={initialKind} />
 
@@ -287,6 +305,7 @@ export default function TransactionsScreen() {
         <TransactionDetailModal
           transaction={selectedDetail}
           onClose={() => setSelectedTransactionId(null)}
+          onDelete={handleDeleteSelected}
         />
       )}
     </ThemedView>
@@ -512,6 +531,11 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     lineHeight: 34,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   form: {
     gap: Spacing.two,

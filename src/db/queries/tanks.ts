@@ -233,6 +233,10 @@ export type IncomeTank = {
   label: string;
   capacity: number;
   level: number;
+  // Cuánto se gastó/reservó de este tanque por encima de lo efectivamente recibido
+  // este ciclo. `level` nunca baja de 0 (ver más abajo), así que sin este campo ese
+  // faltante desaparecía en silencio en vez de quedar visible en algún lado.
+  deficit: number;
 };
 
 export type RuleLineageRow = { id: number; previousRuleId: number | null };
@@ -320,12 +324,14 @@ export function computeIncomeTanks(
         window,
       );
       const reserved = plannedByTank.get(rule.id) ?? 0;
+      const raw = received - allocated - reserved;
       return {
         ruleId: rule.id,
         sectionId: rule.sectionId,
         label: rule.label,
         capacity: rule.isVariableAmount ? received : (rule.estimatedAmount ?? received),
-        level: Math.max(0, received - allocated - reserved),
+        level: Math.max(0, raw),
+        deficit: raw < 0 ? -raw : 0,
       };
     });
 }
@@ -333,6 +339,9 @@ export function computeIncomeTanks(
 export type FreeCashTank = {
   capacity: number;
   level: number;
+  // Igual que IncomeTank.deficit, pero para Libre: raw < 0 significa que algún gasto
+  // (o el neto de un tanque de ingreso) se cubrió con plata que en realidad no estaba.
+  deficit: number;
 };
 
 export function computeFreeCashTank(
@@ -359,37 +368,19 @@ export function computeFreeCashTank(
   // the transactions, not on the rule).
   const oldestTxDate = index.oldestTxDate;
 
-  // Gastos ya planificados (asignados a un tanque) pero todavía no confirmados:
-  // necesarios para calcular el déficit del ciclo en curso de cada tanque de ingreso.
-  const plannedByTank = new Map<number, number>();
-  for (const rule of rules) {
-    if (
-      rule.kind === 'expense' &&
-      !rule.archivedAt &&
-      rule.plannedTankRuleId !== null &&
-      rule.nextDueDate < now
-    ) {
-      const current = plannedByTank.get(rule.plannedTankRuleId) ?? 0;
-      plannedByTank.set(rule.plannedTankRuleId, current + (rule.estimatedAmount ?? 0));
-    }
-  }
-
-  // 3. Leftover from closed cycles of active recurring income rules, plus deficit of current cycle.
+  // 3. Leftover from closed cycles of active recurring income rules.
   // Note: Special tanks are excluded since they are funded from Libre via specialTanksReserved.
+  // El déficit del ciclo EN CURSO de cada regla se excluye a propósito: ya se expone
+  // como su propio "Déficit de <tanque>" en computeIncomeTanks/confirmar.tsx, así que
+  // sumarlo acá también lo cobraría dos veces (una vez por tanque, otra vez de Libre)
+  // por el mismo faltante. Solo los ciclos ya cerrados (sin su propio mecanismo de
+  // confirmación) se absorben en silencio contra Libre.
   const activeRulesNet = rules
     .filter((rule) => rule.kind === 'income' && !rule.archivedAt && rule.tankKind !== 'special')
     .reduce((total, rule) => {
       const ruleIncomes = index.incomeByRuleId.get(rule.id) ?? EMPTY_TRANSACTIONS;
       const ruleAllocated = index.expenseByAllocatedRuleId.get(rule.id) ?? EMPTY_TRANSACTIONS;
-      
-      // Calculate current cycle balance and deficit
       const { start: currentStart } = getCycleWindow(rule, now);
-      const currentReceived = sumInWindow(ruleIncomes, { start: currentStart, end: now });
-      const currentAllocated = sumInWindow(ruleAllocated, { start: currentStart, end: now });
-      const currentReserved = plannedByTank.get(rule.id) ?? 0;
-
-      const currentBalance = currentReceived - currentAllocated - currentReserved;
-      const currentDeficit = Math.min(0, currentBalance);
 
       // Calculate closed cycles leftovers (without capping to 0 per cycle)
       let cycleEnd = currentStart;
@@ -411,7 +402,7 @@ export function computeFreeCashTank(
         ruleLeftover += (received - allocated);
         cycleEnd = cycleStart;
       }
-      return total + ruleLeftover + currentDeficit;
+      return total + ruleLeftover;
     }, 0);
 
   // 4. Leftover from archived rules
@@ -437,13 +428,9 @@ export function computeFreeCashTank(
     .reduce((sum, rule) => sum + (rule.estimatedAmount ?? 0), 0);
 
   // Level is: all free incomes minus all free expenses plus net cash from active and archived recurring rules
-  const level = Math.max(
-    0,
-    (freeIncomeAllTime - freeExpenseAllTime) +
-      activeRulesNet +
-      archivedLeftover -
-      specialTanksReserved,
-  );
+  const rawLevel =
+    (freeIncomeAllTime - freeExpenseAllTime) + activeRulesNet + archivedLeftover - specialTanksReserved;
+  const level = Math.max(0, rawLevel);
 
   // Capacity is the non-recurring incomes in the current window
   const window = { start: windowStart, end: now };
@@ -452,6 +439,7 @@ export function computeFreeCashTank(
   return {
     capacity: Math.max(freeIncomeInWindow, 1),
     level,
+    deficit: rawLevel < 0 ? -rawLevel : 0,
   };
 }
 

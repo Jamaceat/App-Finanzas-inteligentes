@@ -365,7 +365,7 @@ function ResetDataForm() {
       <ThemedView type="backgroundElement" style={styles.form}>
         <ThemedText type="smallBold" style={{ color: '#E5484D' }}>Zona de Peligro</ThemedText>
         <ThemedText type="small" themeColor="textSecondary">
-          Elimina de forma irreversible todos los ingresos, gastos, reglas recurrentes, tanques y metas de ahorro. Se mantendrá la sección por defecto "General".
+          Elimina de forma irreversible todos los ingresos, gastos, reglas recurrentes, tanques y metas de ahorro. Se mantendrá la sección por defecto &quot;General&quot;.
         </ThemedText>
 
         <Pressable onPress={() => setModalVisible(true)} style={({ pressed }) => pressed && styles.pressed}>

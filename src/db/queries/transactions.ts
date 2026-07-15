@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, isNull, like, lte } from 'drizzle-orm';
+import { and, count, desc, eq, gte, isNotNull, isNull, like, lte } from 'drizzle-orm';
 
 import { db } from '@/db/client';
 import { transactions } from '@/db/schema';
@@ -20,6 +20,7 @@ export type TransactionFilter = { sectionId?: number; from?: Date; to?: Date; se
 function transactionFilterConditions(filter?: TransactionFilter) {
   const search = filter?.search?.trim();
   return [
+    isNull(transactions.deletedAt),
     filter?.sectionId !== undefined ? eq(transactions.sectionId, filter.sectionId) : undefined,
     filter?.from ? gte(transactions.occurredAt, filter.from) : undefined,
     filter?.to ? lte(transactions.occurredAt, filter.to) : undefined,
@@ -32,8 +33,11 @@ export function listTransactions(
 ) {
   const conditions = transactionFilterConditions(filter);
 
-  const query = db.select().from(transactions).orderBy(desc(transactions.occurredAt));
-  const filtered = conditions.length > 0 ? query.where(and(...conditions)) : query;
+  const filtered = db
+    .select()
+    .from(transactions)
+    .where(and(...conditions))
+    .orderBy(desc(transactions.occurredAt));
 
   if (filter?.limit !== undefined) {
     return filtered.limit(filter.limit).offset(filter.offset ?? 0);
@@ -57,6 +61,7 @@ export function listTankTransactions() {
       description: transactions.description,
     })
     .from(transactions)
+    .where(isNull(transactions.deletedAt))
     .orderBy(desc(transactions.occurredAt));
 }
 
@@ -65,9 +70,10 @@ export type TankTransaction = Awaited<ReturnType<typeof listTankTransactions>>[n
 export function countTransactions(filter?: TransactionFilter) {
   const conditions = transactionFilterConditions(filter);
 
-  const query = db.select({ count: count() }).from(transactions);
-
-  return conditions.length > 0 ? query.where(and(...conditions)) : query;
+  return db
+    .select({ count: count() })
+    .from(transactions)
+    .where(and(...conditions));
 }
 
 export function createTransaction(
@@ -85,15 +91,63 @@ export function createTransaction(
   return executor.insert(transactions).values(input).returning();
 }
 
-export function deleteTransaction(id: number) {
-  return db.delete(transactions).where(eq(transactions.id, id)).returning();
+// Papelera: ocultar/mostrar la fila alcanza para deshacer/rehacer su efecto en los
+// tanques (ver comentario en schema.ts) — nunca toca recurringRuleId ni la regla que la
+// generó, así que el ciclo sigue "confirmado" para el calendario todo el tiempo.
+export function softDeleteTransaction(id: number, executor: DbExecutor = db) {
+  return executor
+    .update(transactions)
+    .set({ deletedAt: new Date() })
+    .where(and(eq(transactions.id, id), isNull(transactions.deletedAt)))
+    .returning();
+}
+
+// Restaura una transacción exactamente a como estaba: solo limpia deletedAt. Para
+// gastos, allocatedIncomeRuleId se pasa explícitamente cuando el usuario confirmó (o
+// cambió) el tanque de destino en la pantalla de restauración; para ingresos no se pasa.
+export function restoreTransaction(
+  id: number,
+  allocatedIncomeRuleId?: number | null,
+  executor: DbExecutor = db,
+) {
+  return executor
+    .update(transactions)
+    .set({
+      deletedAt: null,
+      ...(allocatedIncomeRuleId !== undefined ? { allocatedIncomeRuleId } : {}),
+    })
+    .where(and(eq(transactions.id, id), isNotNull(transactions.deletedAt)))
+    .returning();
+}
+
+export function listDeletedTransactions(kind: TransactionKind) {
+  return db
+    .select()
+    .from(transactions)
+    .where(and(eq(transactions.kind, kind), isNotNull(transactions.deletedAt)))
+    .orderBy(desc(transactions.deletedAt));
+}
+
+// Purga definitiva: solo se puede borrar algo que ya está en la papelera (deletedAt no
+// nulo), para que esto no se use por error como atajo de borrado directo.
+export function permanentlyDeleteTransaction(id: number) {
+  return db
+    .delete(transactions)
+    .where(and(eq(transactions.id, id), isNotNull(transactions.deletedAt)))
+    .returning();
 }
 
 export function listUnassignedExpenseTransactions() {
   return db
     .select()
     .from(transactions)
-    .where(and(eq(transactions.kind, 'expense'), isNull(transactions.allocatedIncomeRuleId)))
+    .where(
+      and(
+        eq(transactions.kind, 'expense'),
+        isNull(transactions.allocatedIncomeRuleId),
+        isNull(transactions.deletedAt),
+      ),
+    )
     .orderBy(desc(transactions.occurredAt));
 }
 

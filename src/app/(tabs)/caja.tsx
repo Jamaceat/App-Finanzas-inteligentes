@@ -44,7 +44,7 @@ const QUICK_ACTIONS: QuickAction[] = [
   {
     key: 'variable',
     label: 'Variable',
-    hint: 'Programado, monto todavía no lo sabés',
+    hint: 'Programado, monto todavía no lo sabes',
     icon: symbol('questionmark.circle.fill', 'help'),
     enabled: true,
   },

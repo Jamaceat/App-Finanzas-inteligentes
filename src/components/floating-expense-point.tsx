@@ -615,7 +615,7 @@ function FloatingExpensePointComponent({
             </ThemedText>
           )}
           <ThemedText type="code" style={styles.detailsHelper}>
-            Arrastrá el gasto a un tanque o tocalo para asignarlo
+            Arrastra el gasto a un tanque o tócalo para asignarlo
           </ThemedText>
         </Animated.View>
       )}

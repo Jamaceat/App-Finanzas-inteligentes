@@ -369,7 +369,7 @@ export function PocketWidget({
 
             {!selectedTank && (
               <ThemedText type="small" themeColor="textSecondary" style={styles.fullscreenSubtitle}>
-                Tocá un tanque para ver sus gastos.
+                Toca un tanque para ver sus gastos.
               </ThemedText>
             )}
             {selectedTank && (

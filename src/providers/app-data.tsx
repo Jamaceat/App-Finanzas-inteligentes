@@ -1,6 +1,9 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { View, useColorScheme } from 'react-native';
+import Animated, { useSharedValue, useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
 
+import { Colors } from '@/constants/theme';
 import {
   listActiveRecurringRules,
   listAllRecurringRules,
@@ -28,6 +31,25 @@ const AppSettingsRowsContext = createContext<AppSettingsRows | null>(null);
 const TankTransactionsContext = createContext<TankTransactions | null>(null);
 const AppDataReloadContext = createContext<(() => void) | null>(null);
 
+function AnimatedAppContainer({ children }: { children: ReactNode }) {
+  const opacity = useSharedValue(0);
+
+  useEffect(() => {
+    opacity.value = withTiming(1, { duration: 500 });
+  }, [opacity]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    flex: 1,
+    opacity: opacity.value,
+  }));
+
+  return (
+    <Animated.View style={animatedStyle}>
+      {children}
+    </Animated.View>
+  );
+}
+
 function AppDataProviderInner({ children }: { children: ReactNode }) {
   const { data: activeRules } = useLiveQuery(listActiveRecurringRules({ includeSpecialTanks: true }));
   const { data: allRules } = useLiveQuery(listAllRecurringRules());
@@ -40,6 +62,7 @@ function AppDataProviderInner({ children }: { children: ReactNode }) {
   // que vuelva a flotar como burbuja pendiente. Se revisa acá, centralizado, cada vez
   // que cambian las reglas activas.
   useEffect(() => {
+    if (!activeRules) return;
     const expiredIds = activeRules
       .filter((rule) => rule.kind === 'income' && rule.tankKind === 'special' && rule.nextDueDate <= new Date())
       .map((rule) => rule.id);
@@ -48,13 +71,30 @@ function AppDataProviderInner({ children }: { children: ReactNode }) {
     }
   }, [activeRules]);
 
+  const isLoaded =
+    activeRules !== undefined &&
+    allRules !== undefined &&
+    activeSections !== undefined &&
+    settingsRows !== undefined &&
+    tankTransactions !== undefined;
+
+  const colorScheme = useColorScheme();
+  const theme = colorScheme === 'dark' ? 'dark' : 'light';
+  const backgroundColor = Colors[theme].background;
+
+  if (!isLoaded) {
+    return <View style={{ flex: 1, backgroundColor }} />;
+  }
+
   return (
     <ActiveRulesContext.Provider value={activeRules}>
       <AllRulesContext.Provider value={allRules}>
         <ActiveSectionsContext.Provider value={activeSections}>
           <AppSettingsRowsContext.Provider value={settingsRows}>
             <TankTransactionsContext.Provider value={tankTransactions}>
-              {children}
+              <AnimatedAppContainer>
+                {children}
+              </AnimatedAppContainer>
             </TankTransactionsContext.Provider>
           </AppSettingsRowsContext.Provider>
         </ActiveSectionsContext.Provider>
