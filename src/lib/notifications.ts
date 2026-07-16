@@ -87,7 +87,7 @@ export async function syncRuleReminder(rule: ReminderRule): Promise<void> {
     return;
   }
 
-  const verb = rule.kind === 'income' ? 'Registra el ingreso' : 'Registra el gasto';
+  const verb = rule.kind === 'income' ? 'Ingreso pendiente de confirmar' : 'Gasto pendiente de confirmar';
   const amountHint = rule.isVariableAmount
     ? 'Monto variable'
     : rule.estimatedAmount != null
@@ -118,4 +118,44 @@ export async function cancelRuleReminder(ruleId: number): Promise<void> {
 
 export async function resyncAllReminders(rules: ReminderRule[]): Promise<void> {
   await Promise.all(rules.map((rule) => syncRuleReminder(rule)));
+}
+
+const DIGEST_IDENTIFIER = 'pending-confirmations-digest';
+const DIGEST_HOUR = 9;
+const DIGEST_MINUTE = 0;
+
+// Resumen diario mientras haya ciclos pendientes de confirmar (ver
+// computePendingConfirmations en db/queries/tanks.ts). Se recalcula cada vez que
+// cambian las reglas/transacciones (ver NotificationsSync); al no quedar
+// pendientes simplemente se cancela en vez de reprogramarse.
+export async function syncPendingConfirmationsDigest(count: number): Promise<void> {
+  const Notifications = await loadNotificationsAsync();
+  if (!Notifications) {
+    return;
+  }
+
+  await Notifications.cancelScheduledNotificationAsync(DIGEST_IDENTIFIER).catch(() => undefined);
+
+  if (count <= 0) {
+    return;
+  }
+
+  const granted = await ensureNotificationSetupAsync(Notifications);
+  if (!granted) {
+    return;
+  }
+
+  await Notifications.scheduleNotificationAsync({
+    identifier: DIGEST_IDENTIFIER,
+    content: {
+      title: 'Tenés movimientos pendientes de confirmar',
+      body: `${count} ${count === 1 ? 'movimiento' : 'movimientos'} esperando en Confirmar.`,
+    },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.DAILY,
+      hour: DIGEST_HOUR,
+      minute: DIGEST_MINUTE,
+      channelId: CHANNEL_ID,
+    },
+  });
 }
