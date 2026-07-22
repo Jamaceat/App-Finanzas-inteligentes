@@ -16,7 +16,12 @@ export default function RootLayout() {
             <NotificationsSync />
             <Stack>
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-              <Stack.Screen name="recurring-rules" options={{ presentation: 'modal', headerShown: false }} />
+              <Stack.Screen name="add-income" options={{ presentation: 'modal', headerShown: false }} />
+              <Stack.Screen name="add-expense" options={{ presentation: 'modal', headerShown: false }} />
+              <Stack.Screen name="recurring-income" options={{ presentation: 'modal', headerShown: false }} />
+              <Stack.Screen name="recurring-expense" options={{ presentation: 'modal', headerShown: false }} />
+              <Stack.Screen name="recurring-income-list" options={{ presentation: 'modal', headerShown: false }} />
+              <Stack.Screen name="recurring-expense-list" options={{ presentation: 'modal', headerShown: false }} />
               <Stack.Screen name="asignar-gastos" options={{ presentation: 'modal', headerShown: false }} />
               <Stack.Screen name="trash" options={{ presentation: 'modal', headerShown: false }} />
             </Stack>

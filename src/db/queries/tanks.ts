@@ -337,6 +337,11 @@ export function computeIncomeTanks(
 }
 
 export type FreeCashTank = {
+  // Ingresos libres de la ventana reciente. No es un objetivo/límite real (a
+  // diferencia de IncomeTank.capacity): puede ser 0 cuando no hubo ingresos
+  // libres recientes. Los consumidores que necesiten una relación amount/capacity
+  // sin dividir por cero deben aplicar Math.max(capacity, 1) ellos mismos; los que
+  // solo necesiten saber si hay un objetivo real para mostrar deben chequear > 0.
   capacity: number;
   level: number;
   // Igual que IncomeTank.deficit, pero para Libre: raw < 0 significa que algún gasto
@@ -437,7 +442,7 @@ export function computeFreeCashTank(
   const freeIncomeInWindow = sumInWindow(index.freeIncomes, window);
 
   return {
-    capacity: Math.max(freeIncomeInWindow, 1),
+    capacity: freeIncomeInWindow,
     level,
     deficit: rawLevel < 0 ? -rawLevel : 0,
   };

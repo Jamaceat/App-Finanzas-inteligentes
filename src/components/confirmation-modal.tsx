@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
+import { MiniCalendar } from '@/components/mini-calendar';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -70,6 +71,7 @@ type OccurrenceRow = {
   date: Date;
   checked: boolean;
   amountDigits: string;
+  descriptionOverride: string;
 };
 
 export function ConfirmationModal({
@@ -119,10 +121,15 @@ export function ConfirmationModal({
       amountDigits: confirmation.isVariableAmount
         ? ''
         : String(Math.round((confirmation.estimatedAmount ?? 0) * 100)),
+      descriptionOverride: '',
     }));
   });
   const [selectedTankId, setSelectedTankId] = useState<number | null>(rememberedTankId);
   const [submitting, setSubmitting] = useState(false);
+  // Edición puntual (fecha/descripción) de un ciclo individual: colapsada por
+  // defecto para no ensuciar el flujo normal de tildar + confirmar.
+  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+  const [datePickerIndex, setDatePickerIndex] = useState<number | null>(null);
   // Con todo destildado, "Descartar los no marcados" queda habilitado igual (ver
   // canDiscard más abajo) y descarta TODOS los ciclos sin registrar nada — fácil de
   // tocar sin querer pensando que es la forma de "continuar". Se pide una confirmación
@@ -137,6 +144,16 @@ export function ConfirmationModal({
 
   function setRowAmount(index: number, digits: string) {
     setRows((prev) => prev.map((row, i) => (i === index ? { ...row, amountDigits: digits } : row)));
+  }
+
+  function setRowDate(index: number, date: Date) {
+    setRows((prev) => prev.map((row, i) => (i === index ? { ...row, date } : row)));
+  }
+
+  function setRowDescription(index: number, description: string) {
+    setRows((prev) =>
+      prev.map((row, i) => (i === index ? { ...row, descriptionOverride: description } : row)),
+    );
   }
 
   const checkedRows = rows.filter((row) => row.checked);
@@ -269,6 +286,7 @@ export function ConfirmationModal({
         occurrences: checkedRows.map((row) => ({
           occurredAt: row.date,
           amount: Number(row.amountDigits || '0') / 100,
+          description: row.descriptionOverride.trim() || undefined,
         })),
         nextDueDate,
         isSpecialTank,
@@ -324,34 +342,77 @@ export function ConfirmationModal({
               </Pressable>
             </View>
 
-            {rows.map((row, index) => (
-              <View key={row.date.getTime()} style={styles.occurrenceRow}>
-                <Pressable
-                  onPress={() => toggleRow(index)}
-                  style={({ pressed }) => pressed && styles.pressed}>
-                  <ThemedView
-                    type={row.checked ? 'backgroundSelected' : 'background'}
-                    style={styles.checkbox}>
-                    {row.checked && <ThemedText type="smallBold">✓</ThemedText>}
-                  </ThemedView>
-                </Pressable>
-                <ThemedText type="small" style={styles.occurrenceDate}>
-                  {formatDate(row.date)}
-                </ThemedText>
-                <TextInput
-                  value={formatCurrencyInput(row.amountDigits)}
-                  onChangeText={(text) =>
-                    setRowAmount(index, text.replace(/\D/g, '').replace(/^0+(?=\d)/, ''))
-                  }
-                  editable={row.checked}
-                  keyboardType="number-pad"
-                  style={[
-                    styles.amountInput,
-                    { color: theme.text, backgroundColor: theme.background, opacity: row.checked ? 1 : 0.4 },
-                  ]}
-                />
-              </View>
-            ))}
+            {rows.map((row, index) => {
+              const isExpanded = expandedIndex === index;
+              return (
+                <View key={index} style={styles.occurrenceRowWrapper}>
+                  <View style={styles.occurrenceRow}>
+                    <Pressable
+                      onPress={() => toggleRow(index)}
+                      style={({ pressed }) => pressed && styles.pressed}>
+                      <ThemedView
+                        type={row.checked ? 'backgroundSelected' : 'background'}
+                        style={styles.checkbox}>
+                        {row.checked && <ThemedText type="smallBold">✓</ThemedText>}
+                      </ThemedView>
+                    </Pressable>
+                    <ThemedText type="small" style={styles.occurrenceDate}>
+                      {formatDate(row.date)}
+                    </ThemedText>
+                    <TextInput
+                      value={formatCurrencyInput(row.amountDigits)}
+                      onChangeText={(text) =>
+                        setRowAmount(index, text.replace(/\D/g, '').replace(/^0+(?=\d)/, ''))
+                      }
+                      editable={row.checked}
+                      keyboardType="number-pad"
+                      style={[
+                        styles.amountInput,
+                        { color: theme.text, backgroundColor: theme.background, opacity: row.checked ? 1 : 0.4 },
+                      ]}
+                    />
+                    <Pressable
+                      disabled={!row.checked}
+                      hitSlop={8}
+                      onPress={() => setExpandedIndex(isExpanded ? null : index)}
+                      style={({ pressed }) => pressed && styles.pressed}>
+                      <ThemedText
+                        type="link"
+                        style={!row.checked ? styles.disabledButton : undefined}>
+                        {isExpanded ? 'Cerrar' : 'Editar'}
+                      </ThemedText>
+                    </Pressable>
+                  </View>
+                  {isExpanded && row.checked && (
+                    <View style={styles.occurrenceEditBox}>
+                      <ThemedText type="small" themeColor="textSecondary">
+                        Cambios solo para este ciclo puntual, no afectan la regla ni las demás fechas.
+                      </ThemedText>
+                      <Pressable
+                        onPress={() => setDatePickerIndex(index)}
+                        style={({ pressed }) => pressed && styles.pressed}>
+                        <ThemedView type="background" style={styles.dateEditButton}>
+                          <ThemedText type="small" themeColor="textSecondary">
+                            Fecha:
+                          </ThemedText>
+                          <ThemedText type="smallBold">{formatDate(row.date)}</ThemedText>
+                        </ThemedView>
+                      </Pressable>
+                      <TextInput
+                        value={row.descriptionOverride}
+                        onChangeText={(text) => setRowDescription(index, text)}
+                        placeholder={confirmation.label}
+                        placeholderTextColor={theme.textSecondary}
+                        style={[
+                          styles.descriptionInput,
+                          { color: theme.text, backgroundColor: theme.background },
+                        ]}
+                      />
+                    </View>
+                  )}
+                </View>
+              );
+            })}
 
             <View style={styles.totalRow}>
               <ThemedText type="smallBold">Total</ThemedText>
@@ -518,6 +579,30 @@ export function ConfirmationModal({
             </ThemedView>
           </View>
         )}
+
+        {datePickerIndex !== null && (
+          <View style={styles.nestedConfirmOverlay}>
+            <ThemedView type="backgroundElement" style={styles.datePickerCard}>
+              <ThemedText type="smallBold">Elegí la fecha de este ciclo</ThemedText>
+              <MiniCalendar
+                value={rows[datePickerIndex].date}
+                onChange={(date) => {
+                  setRowDate(datePickerIndex, date);
+                  setDatePickerIndex(null);
+                }}
+                highlightDates={[]}
+                highlightColor={isExpense ? '#E5484D' : '#30A46C'}
+              />
+              <Pressable
+                onPress={() => setDatePickerIndex(null)}
+                style={({ pressed }) => pressed && styles.pressed}>
+                <ThemedView type="background" style={styles.modalButton}>
+                  <ThemedText type="small">Cancelar</ThemedText>
+                </ThemedView>
+              </Pressable>
+            </ThemedView>
+          </View>
+        )}
       </View>
     </Modal>
   );
@@ -552,9 +637,39 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: Spacing.four,
   },
+  occurrenceRowWrapper: {
+    gap: Spacing.one,
+  },
   occurrenceRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: Spacing.two,
+  },
+  occurrenceEditBox: {
+    gap: Spacing.two,
+    paddingHorizontal: Spacing.two,
+    paddingBottom: Spacing.one,
+  },
+  dateEditButton: {
+    flexDirection: 'row',
+    alignSelf: 'flex-start',
+    alignItems: 'center',
+    gap: Spacing.one,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+    borderRadius: Spacing.three,
+  },
+  descriptionInput: {
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+    borderRadius: Spacing.three,
+    fontSize: 14,
+  },
+  datePickerCard: {
+    width: '100%',
+    maxWidth: 420,
+    borderRadius: Spacing.four,
+    padding: Spacing.four,
     gap: Spacing.two,
   },
   checkbox: {

@@ -1,5 +1,9 @@
 import { Spacing } from '@/constants/theme';
 
+// Identidad visual de Ingreso vs Gasto en toda la app (Caja, Movimientos, reglas recurrentes).
+export const INCOME_COLOR = '#30A46C';
+export const EXPENSE_COLOR = '#E5484D';
+
 // Home — tanque de ingresos y tanque "Libre"
 export const TANK_COLOR = '#0091FF';
 export const FREE_TANK_COLOR = '#12A594';

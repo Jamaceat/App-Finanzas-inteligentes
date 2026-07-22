@@ -25,6 +25,9 @@ export type SearchTankItem = {
   label: string;
   amount: number;
   capacity: number;
+  // false cuando `capacity` es un piso artificial (sin objetivo/límite real, p. ej.
+  // el tanque Libre sin ingresos libres recientes) en vez de un objetivo real.
+  hasTarget?: boolean;
   color: string;
 };
 
@@ -149,8 +152,9 @@ export function TankSearchModal({
                   <View style={styles.tankCardDetails}>
                     <ThemedText type="smallBold">{item.label}</ThemedText>
                     <ThemedText type="small" themeColor="textSecondary">
-                      {formatCurrency(item.amount)} de{' '}
-                      {formatCurrency(item.capacity)}
+                      {item.hasTarget === false
+                        ? formatCurrency(item.amount)
+                        : `${formatCurrency(item.amount)} de ${formatCurrency(item.capacity)}`}
                     </ThemedText>
                   </View>
                   <SymbolView

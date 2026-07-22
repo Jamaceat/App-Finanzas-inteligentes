@@ -6,11 +6,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { INCOME_COLOR, EXPENSE_COLOR } from '@/constants/constants';
 import { useTheme } from '@/hooks/use-theme';
 import type { TransactionKind } from '@/db/queries/transactions';
-
-const INCOME_COLOR = '#30A46C';
-const EXPENSE_COLOR = '#E5484D';
 
 function symbol(ios: SFSymbol, android: AndroidSymbol) {
   return { ios, android, web: android };
@@ -132,16 +130,30 @@ function TransactionKindColumn({
           action={action}
           onPress={() => {
             if (action.key === 'now') {
-              router.push({ pathname: '/transactions', params: { kind } });
+              router.push(kind === 'income' ? '/add-income' : '/add-expense');
             } else {
               router.push({
-                pathname: '/recurring-rules',
-                params: { kind, variable: action.key === 'variable' ? '1' : '0' },
+                pathname: kind === 'income' ? '/recurring-income' : '/recurring-expense',
+                params: { variable: action.key === 'variable' ? '1' : '0' },
               });
             }
           }}
         />
       ))}
+
+      <Pressable
+        onPress={() => router.push(kind === 'income' ? '/recurring-income-list' : '/recurring-expense-list')}
+        style={({ pressed }) => pressed && styles.pressed}>
+        <ThemedView type="backgroundElement" style={styles.actionButton}>
+          <SymbolView name={symbol('list.bullet', 'list')} tintColor={color} size={18} />
+          <View style={styles.actionTextWrapper}>
+            <ThemedText type="small">Ver reglas</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary" style={styles.actionHint}>
+              {kind === 'income' ? 'Ingresos recurrentes activos' : 'Gastos recurrentes activos'}
+            </ThemedText>
+          </View>
+        </ThemedView>
+      </Pressable>
     </View>
   );
 }

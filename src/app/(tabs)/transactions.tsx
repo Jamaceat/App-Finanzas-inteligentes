@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -7,7 +7,6 @@ import { SymbolView, type AndroidSymbol, type SFSymbol } from 'expo-symbols';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { TankSearchModal, type SearchTankItem } from '@/components/tank-search-modal';
 import { TransactionDetailModal, type TransactionDetailData } from '@/components/transaction-detail-modal';
 import { PaginationControls } from '@/components/pagination-controls';
 import { FilterChip } from '@/components/filter-chip';
@@ -15,16 +14,9 @@ import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import { FREE_TANK_COLOR, SPECIAL_TANK_COLOR, TANK_COLOR } from '@/constants/constants';
 import { useTheme } from '@/hooks/use-theme';
 import { usePagination } from '@/hooks/use-pagination';
-import {
-  countTransactions,
-  createTransaction,
-  listTransactions,
-  softDeleteTransaction,
-  type TransactionKind,
-} from '@/db/queries/transactions';
-import { getOrCreateDefaultSection } from '@/db/queries/sections';
+import { countTransactions, listTransactions, softDeleteTransaction } from '@/db/queries/transactions';
 import { listAllRecurringRules } from '@/db/queries/recurring-rules';
-import { computeFreeCashTank, computeIncomeTanks, addInterval } from '@/db/queries/tanks';
+import { computeIncomeTanks } from '@/db/queries/tanks';
 import {
   useActiveRules,
   useActiveSections,
@@ -43,11 +35,6 @@ const currencyFormatter = new Intl.NumberFormat('es-AR', {
   maximumFractionDigits: 2,
 });
 
-function formatCurrencyInput(digits: string): string {
-  const cents = Number(digits || '0');
-  return currencyFormatter.format(cents / 100);
-}
-
 function formatCurrency(amount: number): string {
   return currencyFormatter.format(amount);
 }
@@ -56,13 +43,11 @@ const TRANSACTIONS_PAGE_SIZE = 20;
 
 export default function TransactionsScreen() {
   const router = useRouter();
-  const { kind: initialKind } = useLocalSearchParams<{ kind?: TransactionKind }>();
   const [sectionFilter, setSectionFilter] = useState<number | undefined>(undefined);
   const [searchText, setSearchText] = useState('');
 
   const sections = useActiveSections();
   const settingsRows = useAppSettingsRows();
-  const settings = settingsRows[0] ?? { tankMaxRenewalValue: 30, tankMaxRenewalUnit: 'days' as const };
   const pageSize = settingsRows[0]?.transactionsPageSize ?? TRANSACTIONS_PAGE_SIZE;
   const { data: transactionCountRows } = useLiveQuery(
     countTransactions({ sectionId: sectionFilter, search: searchText }),
@@ -99,36 +84,6 @@ export default function TransactionsScreen() {
     () => computeIncomeTanks(rules, allTransactions, allRules),
     [rules, allTransactions, allRules],
   );
-  const freeCashTank = useMemo(() => {
-    const windowStart = addInterval(
-      new Date(),
-      -settings.tankMaxRenewalValue,
-      settings.tankMaxRenewalUnit,
-    );
-    return computeFreeCashTank(rules, allTransactions, windowStart, allRules);
-  }, [rules, allTransactions, settings.tankMaxRenewalValue, settings.tankMaxRenewalUnit, allRules]);
-
-  const tanks: SearchTankItem[] = useMemo(() => {
-    const list: SearchTankItem[] = [
-      {
-        ruleId: undefined,
-        label: 'Libre',
-        amount: freeCashTank.level,
-        capacity: Math.max(freeCashTank.capacity, 1),
-        color: FREE_TANK_COLOR,
-      },
-    ];
-    incomeTanks.forEach((tank) => {
-      list.push({
-        ruleId: tank.ruleId,
-        label: tank.label,
-        amount: tank.level,
-        capacity: Math.max(tank.capacity, 1),
-        color: TANK_COLOR,
-      });
-    });
-    return list;
-  }, [freeCashTank, incomeTanks]);
 
   const tankLabelByRuleId = useMemo(
     () => new Map(incomeTanks.map((tank) => [tank.ruleId, tank.label])),
@@ -218,8 +173,6 @@ export default function TransactionsScreen() {
               <SymbolView name={symbol('trash', 'delete')} tintColor={theme.textSecondary} size={22} />
             </Pressable>
           </View>
-
-          <QuickAddForm sections={sections} tanks={tanks} initialKind={initialKind} />
 
           <TransactionSearchBar value={searchText} onChangeText={setSearchText} />
 
@@ -364,151 +317,6 @@ function SectionFilterRow({
   );
 }
 
-function QuickAddForm({
-  sections,
-  tanks,
-  initialKind,
-}: {
-  sections: { id: number; name: string }[];
-  tanks: SearchTankItem[];
-  initialKind?: TransactionKind;
-}) {
-  const theme = useTheme();
-  const [kind, setKind] = useState<TransactionKind>(initialKind ?? 'expense');
-  const [amountDigits, setAmountDigits] = useState('');
-  const [description, setDescription] = useState('');
-  const [sectionId, setSectionId] = useState<number | undefined>(undefined);
-  const [selectedTank, setSelectedTank] = useState<SearchTankItem | null>(null);
-  const [tankModalVisible, setTankModalVisible] = useState(false);
-  const [tankSearchQuery, setTankSearchQuery] = useState('');
-
-  const parsedAmount = Number(amountDigits || '0') / 100;
-  const formattedAmount = formatCurrencyInput(amountDigits);
-
-  function handleAmountChange(text: string) {
-    const digitsOnly = text.replace(/\D/g, '');
-    setAmountDigits(digitsOnly.replace(/^0+(?=\d)/, ''));
-  }
-
-  async function handleSubmit() {
-    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-      return;
-    }
-
-    const resolvedSectionId = sectionId ?? (await getOrCreateDefaultSection()).id;
-
-    await createTransaction({
-      sectionId: resolvedSectionId,
-      amount: parsedAmount,
-      kind,
-      description: description.trim() || undefined,
-      occurredAt: new Date(),
-      allocatedIncomeRuleId: kind === 'expense' ? selectedTank?.ruleId : undefined,
-    });
-
-    setAmountDigits('');
-    setDescription('');
-  }
-
-  return (
-    <ThemedView type="backgroundElement" style={styles.form}>
-      <View style={styles.kindRow}>
-        <Pressable style={styles.kindButton} onPress={() => setKind('expense')}>
-          <ThemedView
-            type={kind === 'expense' ? 'backgroundSelected' : 'background'}
-            style={styles.kindButtonInner}>
-            <ThemedText type="small">Gasto</ThemedText>
-          </ThemedView>
-        </Pressable>
-        <Pressable style={styles.kindButton} onPress={() => setKind('income')}>
-          <ThemedView
-            type={kind === 'income' ? 'backgroundSelected' : 'background'}
-            style={styles.kindButtonInner}>
-            <ThemedText type="small">Ingreso</ThemedText>
-          </ThemedView>
-        </Pressable>
-      </View>
-
-      <TextInput
-        value={formattedAmount}
-        onChangeText={handleAmountChange}
-        placeholder="$ 0,00"
-        placeholderTextColor={theme.textSecondary}
-        keyboardType="number-pad"
-        style={[styles.input, { color: theme.text, backgroundColor: theme.background }]}
-      />
-
-      <TextInput
-        value={description}
-        onChangeText={setDescription}
-        placeholder="Descripción (opcional)"
-        placeholderTextColor={theme.textSecondary}
-        style={[styles.input, { color: theme.text, backgroundColor: theme.background }]}
-      />
-
-      {sections.length > 0 && (
-        <View style={styles.chipRow}>
-          <FilterChip
-            label="Sin sección"
-            selected={sectionId === undefined}
-            onPress={() => setSectionId(undefined)}
-          />
-          {sections.map((section) => (
-            <FilterChip
-              key={section.id}
-              label={section.name}
-              selected={sectionId === section.id}
-              onPress={() => setSectionId(section.id)}
-            />
-          ))}
-        </View>
-      )}
-
-      {kind === 'expense' && (
-        <Pressable
-          onPress={() => setTankModalVisible(true)}
-          style={({ pressed }) => pressed && styles.pressed}>
-          <ThemedView type="background" style={styles.tankPicker}>
-            <View
-              style={[
-                styles.tankPickerDot,
-                { backgroundColor: selectedTank?.color ?? FREE_TANK_COLOR },
-              ]}
-            />
-            <ThemedText type="small" style={styles.tankPickerLabel}>
-              {selectedTank ? `Sale de: ${selectedTank.label}` : 'Sale de: Libre'}
-            </ThemedText>
-            <SymbolView
-              name={symbol('chevron.right', 'chevron_right')}
-              tintColor={theme.textSecondary}
-              size={14}
-            />
-          </ThemedView>
-        </Pressable>
-      )}
-
-      <Pressable onPress={handleSubmit} style={({ pressed }) => pressed && styles.pressed}>
-        <ThemedView type="backgroundSelected" style={styles.submitButton}>
-          <ThemedText type="smallBold">Agregar</ThemedText>
-        </ThemedView>
-      </Pressable>
-
-      <TankSearchModal
-        visible={tankModalVisible}
-        onClose={() => setTankModalVisible(false)}
-        tanks={tanks}
-        searchQuery={tankSearchQuery}
-        onSearchQueryChange={setTankSearchQuery}
-        onSelectTank={(tank) => {
-          setSelectedTank(tank.ruleId === undefined ? null : tank);
-          setTankModalVisible(false);
-          setTankSearchQuery('');
-        }}
-      />
-    </ThemedView>
-  );
-}
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -537,29 +345,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  form: {
-    gap: Spacing.two,
-    padding: Spacing.three,
-    borderRadius: Spacing.four,
-  },
-  kindRow: {
-    flexDirection: 'row',
-    gap: Spacing.two,
-  },
-  kindButton: {
-    flex: 1,
-  },
-  kindButtonInner: {
-    paddingVertical: Spacing.two,
-    borderRadius: Spacing.three,
-    alignItems: 'center',
-  },
-  input: {
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
-    borderRadius: Spacing.three,
-    fontSize: 16,
-  },
   chipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -577,27 +362,6 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
     padding: 0,
-  },
-  tankPicker: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-    paddingVertical: Spacing.two,
-    paddingHorizontal: Spacing.three,
-    borderRadius: Spacing.three,
-  },
-  tankPickerDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
-  tankPickerLabel: {
-    flex: 1,
-  },
-  submitButton: {
-    alignItems: 'center',
-    paddingVertical: Spacing.two,
-    borderRadius: Spacing.three,
   },
   list: {
     gap: Spacing.two,

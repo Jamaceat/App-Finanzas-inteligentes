@@ -334,7 +334,7 @@ export async function confirmRecurringOccurrences(input: {
   kind: TransactionKind;
   description?: string;
   allocatedIncomeRuleId?: number | null;
-  occurrences: { occurredAt: Date; amount: number }[];
+  occurrences: { occurredAt: Date; amount: number; description?: string }[];
   nextDueDate: Date;
   // El tanque usado es un tanque especial temporal: además de recordarlo como plan,
   // hay que sincronizar su propio vencimiento con el próximo cobro real del gasto.
@@ -350,7 +350,7 @@ export async function confirmRecurringOccurrences(input: {
           sectionId: input.sectionId,
           amount: occurrence.amount,
           kind: input.kind,
-          description: input.description,
+          description: occurrence.description ?? input.description,
           occurredAt: occurrence.occurredAt,
           recurringRuleId: input.ruleId,
           allocatedIncomeRuleId: input.allocatedIncomeRuleId ?? undefined,

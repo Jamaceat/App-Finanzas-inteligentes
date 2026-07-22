@@ -72,6 +72,7 @@ export default function TrashScreen() {
         label: 'Libre',
         amount: freeCashTank.level,
         capacity: Math.max(freeCashTank.capacity, 1),
+        hasTarget: freeCashTank.capacity > 0,
         color: FREE_TANK_COLOR,
       },
     ];
